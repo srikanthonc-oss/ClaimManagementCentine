@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Base colors - WCAG AA compliant (4.5:1 contrast ratio for normal text) */
+    --background: 0 0% 100%;
+    --foreground: 222.2 47.4% 11.2%;
+    
+    /* Card colors */
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+    
+    /* Popover colors */
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+    
+    /* Primary colors - Blue theme for healthcare */
+    --primary: 217.2 91.2% 45%;
+    --primary-foreground: 0 0% 100%;
+    
+    /* Secondary colors */
+    --secondary: 214.3 31.8% 91.4%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    
+    /* Muted colors */
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 35%;
+    
+    /* Accent colors */
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    
+    /* Destructive colors - Red for errors/denials */
+    --destructive: 0 84.2% 45%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* Success colors - Green for approvals */
+    --success: 142.1 70.6% 30%;
+    --success-foreground: 0 0% 100%;
+    
+    /* Warning colors - Amber for pending/review */
+    --warning: 38 92% 32%;
+    --warning-foreground: 0 0% 100%;
+    
+    /* Info colors - Cyan for informational */
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+    
+    /* Border and input colors */
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 217.2 91.2% 45%;
+    
+    /* Platform-specific colors */
+    --platform-facet: 262.1 83.3% 57.8%;
+    --platform-amisys: 173.4 80.4% 40%;
+    --platform-xcelys: 24.6 95% 53.1%;
+    
+    /* Status colors */
+    --status-pending: 38 92% 42%;
+    --status-approved: 142.1 76.2% 36.3%;
+    --status-denied: 0 84.2% 45%;
+    --status-review: 199 89% 42%;
+    
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Base colors - WCAG AA compliant for dark mode */
+    --background: 222.2 47.4% 11.2%;
+    --foreground: 210 40% 98%;
+    
+    /* Card colors */
+    --card: 217.2 32.6% 17.5%;
+    --card-foreground: 210 40% 98%;
+    
+    /* Popover colors */
+    --popover: 217.2 32.6% 17.5%;
+    --popover-foreground: 210 40% 98%;
+    
+    /* Primary colors - Lighter blue for dark mode */
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    
+    /* Secondary colors */
+    --secondary: 217.2 32.6% 25%;
+    --secondary-foreground: 210 40% 98%;
+    
+    /* Muted colors */
+    --muted: 217.2 32.6% 25%;
+    --muted-foreground: 215 20.2% 70%;
+    
+    /* Accent colors */
+    --accent: 217.2 32.6% 25%;
+    --accent-foreground: 210 40% 98%;
+    
+    /* Destructive colors - Lighter red for dark mode */
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 222.2 47.4% 11.2%;
+    
+    /* Success colors - Lighter green for dark mode */
+    --success: 142.1 70.6% 45.3%;
+    --success-foreground: 222.2 47.4% 11.2%;
+    
+    /* Warning colors - Lighter amber for dark mode */
+    --warning: 38 92% 60%;
+    --warning-foreground: 222.2 47.4% 11.2%;
+    
+    /* Info colors - Lighter cyan for dark mode */
+    --info: 199 89% 58%;
+    --info-foreground: 222.2 47.4% 11.2%;
+    
+    /* Border and input colors */
+    --border: 217.2 32.6% 25%;
+    --input: 217.2 32.6% 25%;
+    --ring: 217.2 91.2% 59.8%;
+    
+    /* Platform-specific colors - adjusted for dark mode */
+    --platform-facet: 262.1 83.3% 67.8%;
+    --platform-amisys: 173.4 80.4% 50%;
+    --platform-xcelys: 24.6 95% 63.1%;
+    
+    /* Status colors - adjusted for dark mode */
+    --status-pending: 38 92% 60%;
+    --status-approved: 142.1 70.6% 45.3%;
+    --status-denied: 0 84.2% 60.2%;
+    --status-review: 199 89% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground text-sm;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Ensure proper contrast for interactive elements */
+@layer components {
+  .interactive-element {
+    @apply transition-colors duration-200;
+  }
+  
+  .interactive-element:hover {
+    @apply opacity-90;
+  }
+  
+  .interactive-element:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
