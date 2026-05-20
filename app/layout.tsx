@@ -8,7 +8,7 @@ import { AppLayout } from '@/components/app-layout'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Claims Management UI',
+  title: 'Agentic AI Claim Management',
   description: 'Healthcare claims processing and management system',
 }
 

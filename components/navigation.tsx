@@ -35,8 +35,8 @@ export function Navigation() {
     <aside className="fixed inset-y-0 left-0 z-50 flex w-56 flex-col border-r border-border bg-background">
       {/* Brand */}
       <div className="flex h-12 items-center border-b border-border px-4">
-        <Link href="/" className="text-sm font-bold text-foreground">
-          Claims Management
+        <Link href="/" className="text-base font-bold text-foreground">
+          Agentic AI Claim Management
         </Link>
       </div>
 
