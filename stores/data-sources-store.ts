@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { DataSource, DataSourceType } from '@/types'
 import { validateDataSource, validateDataSourceConfig } from '@/lib/schemas'
 
@@ -30,7 +31,9 @@ interface DataSourcesState {
  * - Validation logic for data source configurations
  * - Filtering by type and status
  */
-export const useDataSourcesStore = create<DataSourcesState>((set, get) => ({
+export const useDataSourcesStore = create<DataSourcesState>()(
+  persist(
+    (set, get) => ({
   // Initial state
   dataSources: [],
 
@@ -202,4 +205,10 @@ export const useDataSourcesStore = create<DataSourcesState>((set, get) => ({
       .filter(ds => ds.status === status)
       .map(ds => ({ ...ds }))
   },
-}))
+    }),
+    {
+      name: 'data-sources-storage',
+      partialize: (state) => ({ dataSources: state.dataSources }),
+    }
+  )
+)

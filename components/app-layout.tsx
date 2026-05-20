@@ -2,18 +2,12 @@
 
 import * as React from 'react'
 import { Navigation } from '@/components/navigation'
-import { useUIStore } from '@/stores/ui-store'
 
 export interface AppLayoutProps {
   children: React.ReactNode
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
-  // Rehydrate persisted store on client mount
-  React.useEffect(() => {
-    useUIStore.persist.rehydrate()
-  }, [])
-
   return (
     <div className="relative min-h-screen">
       {/* Left Sidebar Navigation */}

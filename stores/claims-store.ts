@@ -1,5 +1,19 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { Claim, Platform, Classification, ClaimStatus } from '@/types'
+
+/**
+ * Upload history entry — tracks each file upload
+ */
+export interface UploadRecord {
+  id: string
+  fileName: string
+  platform: Platform
+  uploadedAt: string // ISO string for serialization
+  claimsCount: number
+  status: 'processed' | 'partial' | 'failed'
+  duplicatesSkipped: number
+}
 
 /**
  * Claims Store State Interface
@@ -7,12 +21,16 @@ import type { Claim, Platform, Classification, ClaimStatus } from '@/types'
 interface ClaimsState {
   // State
   claims: Claim[]
+  uploads: UploadRecord[]
 
   // Actions
   setClaims: (claims: Claim[]) => void
   addClaims: (claims: Claim[]) => void
   clearClaims: () => void
   updateClaim: (id: string, updates: Partial<Claim>) => void
+  addUpload: (upload: UploadRecord) => void
+  removeUpload: (uploadId: string) => void
+  clearUploads: () => void
 
   // Selectors
   getClaimsByPlatform: (platform: Platform) => Claim[]
@@ -37,10 +55,14 @@ interface ClaimsState {
  * - CRUD operations (set, add, clear, update)
  * - Filtering by platform, classification, and status
  * - Computed metrics for dashboard and analytics
+ * - Persistence via localStorage so data survives page refreshes
  */
-export const useClaimsStore = create<ClaimsState>((set, get) => ({
+export const useClaimsStore = create<ClaimsState>()(
+  persist(
+    (set, get) => ({
   // Initial state
   claims: [],
+  uploads: [],
 
   // Actions
   /**
@@ -68,7 +90,7 @@ export const useClaimsStore = create<ClaimsState>((set, get) => ({
    * Clear all claims from the store
    */
   clearClaims: () => {
-    set({ claims: [] })
+    set({ claims: [], uploads: [] })
   },
 
   /**
@@ -84,6 +106,29 @@ export const useClaimsStore = create<ClaimsState>((set, get) => ({
           : claim
       ),
     }))
+  },
+
+  /**
+   * Add an upload record to history
+   * @param upload - The upload record to add
+   */
+  addUpload: (upload: UploadRecord) => {
+    set((state) => ({ uploads: [upload, ...state.uploads] }))
+  },
+
+  /**
+   * Remove an upload record by ID
+   * @param uploadId - The upload ID to remove
+   */
+  removeUpload: (uploadId: string) => {
+    set((state) => ({ uploads: state.uploads.filter((u) => u.id !== uploadId) }))
+  },
+
+  /**
+   * Clear all upload records
+   */
+  clearUploads: () => {
+    set({ uploads: [] })
   },
 
   // Selectors
@@ -233,4 +278,10 @@ export const useClaimsStore = create<ClaimsState>((set, get) => ({
     const total = claims.reduce((sum, claim) => sum + claim.daysAged, 0)
     return total / claims.length
   },
-}))
+    }),
+    {
+      name: 'claims-storage',
+      partialize: (state) => ({ claims: state.claims, uploads: state.uploads }),
+    }
+  )
+)

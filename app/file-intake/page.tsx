@@ -1,14 +1,23 @@
 'use client'
 
 import * as React from 'react'
-import { DynamicTabs } from '@/components/file-intake/dynamic-tabs'
-import { ClaimsTable } from '@/components/claims-table'
-import { LoadingSpinner } from '@/components/loading-spinner'
-import { useClaimsStore } from '@/stores/claims-store'
+import { useClaimsStore, type UploadRecord } from '@/stores/claims-store'
 import { useUIStore } from '@/stores/ui-store'
+import { useDataSourcesStore } from '@/stores/data-sources-store'
 import { parseXLSFile } from '@/lib/xls-parser'
+import { formatCurrency, cn } from '@/lib/utils'
 import type { FileUploadResult, Classification, Platform } from '@/types'
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle } from 'lucide-react'
+import {
+  Upload,
+  FileSpreadsheet,
+  CheckCircle2,
+  AlertCircle,
+  Files,
+  Database,
+  Layers,
+  Trash2,
+  AlertTriangle,
+} from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -19,6 +28,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Card, CardContent } from '@/components/ui/card'
+import { LoadingSpinner } from '@/components/loading-spinner'
 import {
   Dialog,
   DialogContent,
@@ -32,67 +43,90 @@ export default function FileIntakePage() {
   const [selectedPlatform, setSelectedPlatform] = React.useState<Platform | ''>('')
   const [isProcessing, setIsProcessing] = React.useState(false)
   const [uploadResult, setUploadResult] = React.useState<FileUploadResult | null>(null)
-  const [activeTab, setActiveTab] = React.useState<string>('')
   const [parsingError, setParsingError] = React.useState<string | null>(null)
   const [fileName, setFileName] = React.useState('')
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   // Stores
   const claims = useClaimsStore((state) => state.claims)
+  const uploads = useClaimsStore((state) => state.uploads)
   const addClaims = useClaimsStore((state) => state.addClaims)
+  const addUpload = useClaimsStore((state) => state.addUpload)
+  const removeUpload = useClaimsStore((state) => state.removeUpload)
+  const clearClaims = useClaimsStore((state) => state.clearClaims)
   const selectedPlatforms = useUIStore((state) => state.selectedPlatforms)
   const togglePlatform = useUIStore((state) => state.togglePlatform)
   const clearPlatformFilters = useUIStore((state) => state.clearPlatformFilters)
+  const dataSources = useDataSourcesStore((state) => state.dataSources)
 
-  const platforms: Platform[] = ['Facet', 'Amisys', 'Xcelys']
+  const allPlatforms: Platform[] = ['Facet', 'Amisys', 'Xcelys']
 
-  // Filter by platform
-  const platformFilteredClaims = React.useMemo(() => {
-    if (selectedPlatforms.length === 0) return claims
-    return claims.filter((claim) => selectedPlatforms.includes(claim.platform))
+  // Available platforms come from active data sources only
+  const enabledPlatforms = React.useMemo(() => {
+    const activeSourceNames = dataSources
+      .filter((ds) => ds.status === 'active')
+      .map((ds) => ds.name)
+    return allPlatforms.filter((p) => activeSourceNames.includes(p))
+  }, [dataSources])
+
+  // Filter claims by selected platforms for stats — empty when none selected
+  const filteredClaims = React.useMemo(() => {
+    if (selectedPlatforms.length === 0) return []
+    return claims.filter((c) => selectedPlatforms.includes(c.platform))
   }, [claims, selectedPlatforms])
 
-  // Classifications from filtered claims
-  const classifications = React.useMemo(() => {
-    const unique = new Set<Classification>()
-    platformFilteredClaims.forEach((claim) => unique.add(claim.classification))
-    return Array.from(unique)
-  }, [platformFilteredClaims])
+  // Summary cards
+  const summaryStats = React.useMemo(() => {
+    const totalFiles = uploads.length
+    const totalClaims = claims.length
+    const activePlatforms = new Set(claims.map((c) => c.platform)).size
+    return { totalFiles, totalClaims, activePlatforms }
+  }, [uploads, claims])
 
-  const classificationCounts = React.useMemo(() => {
+  // Platform breakdown (uses filtered claims to respect platform selection)
+  const platformBreakdown = React.useMemo(() => {
+    const breakdown: Record<string, { files: number; claims: number; billed: number }> = {}
+    allPlatforms.forEach((p) => { breakdown[p] = { files: 0, claims: 0, billed: 0 } })
+
+    uploads.forEach((u) => {
+      if (breakdown[u.platform]) {
+        breakdown[u.platform].files += 1
+      }
+    })
+
+    filteredClaims.forEach((c) => {
+      if (breakdown[c.platform]) {
+        breakdown[c.platform].claims += 1
+        breakdown[c.platform].billed += c.billedAmount
+      }
+    })
+
+    return allPlatforms
+      .map((p) => ({ platform: p, ...breakdown[p] }))
+      .filter((row) => row.files > 0 || row.claims > 0)
+  }, [uploads, filteredClaims])
+
+  // Category breakdown (filtered by platform selection)
+  const categoryBreakdown = React.useMemo(() => {
     const counts: Record<string, number> = {}
-    platformFilteredClaims.forEach((claim) => {
-      counts[claim.classification] = (counts[claim.classification] || 0) + 1
+    filteredClaims.forEach((c) => {
+      counts[c.classification] = (counts[c.classification] || 0) + 1
     })
-    return counts
-  }, [platformFilteredClaims])
+    const total = filteredClaims.length
+    return Object.entries(counts)
+      .sort(([, a], [, b]) => b - a)
+      .map(([category, count]) => ({
+        category,
+        count,
+        percentage: total > 0 ? Math.round((count / total) * 100) : 0,
+      }))
+  }, [filteredClaims])
 
-  // Filter by active tab
-  const filteredClaims = React.useMemo(() => {
-    if (!activeTab) return platformFilteredClaims
-    return platformFilteredClaims.filter((claim) => claim.classification === activeTab)
-  }, [platformFilteredClaims, activeTab])
-
-  // Platform counts from ALL claims (not filtered)
-  const platformCounts = React.useMemo(() => {
-    const counts: Record<string, number> = { Facet: 0, Amisys: 0, Xcelys: 0 }
-    claims.forEach((claim) => {
-      counts[claim.platform] = (counts[claim.platform] || 0) + 1
-    })
-    return counts
-  }, [claims])
-
-  // Reset active tab when filters change
-  React.useEffect(() => {
-    if (classifications.length === 0) {
-      setActiveTab('')
-      return
-    }
-    if (!activeTab || !classifications.includes(activeTab as Classification)) {
-      const sorted = [...classifications].sort((a, b) => a.localeCompare(b))
-      setActiveTab(sorted[0])
-    }
-  }, [classifications, activeTab, selectedPlatforms])
+  // Last upload time
+  const lastUploadTime = React.useMemo(() => {
+    if (uploads.length === 0) return null
+    return new Date(uploads[0].uploadedAt)
+  }, [uploads])
 
   const handleBrowseClick = () => {
     if (!selectedPlatform) return
@@ -122,12 +156,25 @@ export default function FileIntakePage() {
       setUploadResult(result)
 
       if (result.success && result.claims.length > 0) {
-        // APPEND claims (not replace) so multiple uploads accumulate
+        // Count duplicates before adding
+        const existingIds = new Set(claims.map((c) => c.id))
+        const dupes = result.claims.filter((c) => existingIds.has(c.id)).length
+
+        // Add claims to store
         addClaims(result.claims)
-        const unique = new Set<Classification>()
-        result.claims.forEach((claim) => unique.add(claim.classification))
-        const sorted = Array.from(unique).sort((a, b) => a.localeCompare(b))
-        if (sorted.length > 0) setActiveTab(sorted[0])
+
+        // Record the upload
+        const uploadRecord: UploadRecord = {
+          id: `upload-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          fileName: file.name,
+          platform: selectedPlatform as Platform,
+          uploadedAt: new Date().toISOString(),
+          claimsCount: result.claims.length,
+          status: 'processed',
+          duplicatesSkipped: dupes,
+        }
+        addUpload(uploadRecord)
+
         // Auto-select the uploaded platform in the filter
         if (selectedPlatform && !selectedPlatforms.includes(selectedPlatform)) {
           togglePlatform(selectedPlatform)
@@ -150,13 +197,33 @@ export default function FileIntakePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">File Intake</h1>
-          <p className="text-xs text-muted-foreground">Upload and process XLS claims data</p>
+          <h1 className="text-2xl font-bold">Claims File Intake</h1>
+          <p className="text-xs text-muted-foreground">
+            Upload and process XLS claims data
+            {lastUploadTime && (
+              <span className="ml-2 text-muted-foreground">
+                · Last upload: {lastUploadTime.toLocaleDateString()} {lastUploadTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+          </p>
         </div>
-        <Button size="sm" className="h-8 gap-2 text-xs" onClick={() => setIsDialogOpen(true)}>
-          <Upload className="h-3.5 w-3.5" />
-          Upload File
-        </Button>
+        <div className="flex items-center gap-2">
+          {claims.length > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive"
+              onClick={clearClaims}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear All
+            </Button>
+          )}
+          <Button size="sm" className="h-8 gap-2 text-xs" onClick={() => setIsDialogOpen(true)}>
+            <Upload className="h-3.5 w-3.5" />
+            Upload File
+          </Button>
+        </div>
       </div>
 
       {/* Success banner */}
@@ -169,34 +236,142 @@ export default function FileIntakePage() {
         </div>
       )}
 
-      {/* Claims Data */}
-      {claims.length > 0 && !isProcessing && (
-        <section className="space-y-3">
-          {/* Heading */}
+      {/* Summary Cards */}
+      {claims.length > 0 && (
+        <div className="grid gap-4 grid-cols-3">
+          <Card>
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="rounded-full bg-blue-500/20 p-2">
+                <Files className="h-4 w-4 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold">{summaryStats.totalFiles}</p>
+                <p className="text-[10px] text-muted-foreground">Files Uploaded</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="rounded-full bg-green-500/20 p-2">
+                <Database className="h-4 w-4 text-green-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold">{summaryStats.totalClaims.toLocaleString()}</p>
+                <p className="text-[10px] text-muted-foreground">Total Claims Loaded</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="rounded-full bg-purple-500/20 p-2">
+                <Layers className="h-4 w-4 text-purple-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold">{summaryStats.activePlatforms} of 3</p>
+                <p className="text-[10px] text-muted-foreground">Platforms Active</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Upload History Table */}
+      {uploads.length > 0 && (
+        <section className="space-y-2">
           <div className="flex items-center gap-2">
             <FileSpreadsheet className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold">Claims Data</span>
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-              {platformFilteredClaims.length} claims
-            </span>
+            <span className="text-sm font-semibold">Upload History</span>
           </div>
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/80">
+                <tr className="border-b">
+                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">File Name</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Platform</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Date Uploaded</th>
+                  <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Claims</th>
+                  <th className="text-center px-4 py-2.5 font-medium text-muted-foreground">Status</th>
+                  <th className="text-center px-4 py-2.5 font-medium text-muted-foreground"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploads.map((upload) => (
+                  <tr key={upload.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <FileSpreadsheet className="h-3.5 w-3.5 text-green-500" />
+                        <span className="font-medium">{upload.fileName}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium">
+                        {upload.platform}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground">
+                      {new Date(upload.uploadedAt).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}{' '}
+                      {new Date(upload.uploadedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium">{upload.claimsCount}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-green-500/20 px-2 py-0.5 text-[10px] font-medium text-green-400">
+                        <CheckCircle2 className="h-2.5 w-2.5" />
+                        Processed
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeUpload(upload.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {uploads.some((u) => u.duplicatesSkipped > 0) && (
+            <p className="text-[10px] text-muted-foreground">
+              ⓘ {uploads.reduce((sum, u) => sum + u.duplicatesSkipped, 0)} duplicate claims skipped across uploads
+            </p>
+          )}
+        </section>
+      )}
 
+      {/* Statistics Section */}
+      {claims.length > 0 && (
+        <section className="space-y-3">
           {/* Platform Filter */}
           <div className="flex items-center gap-5 rounded-lg border bg-card px-4 py-3">
-            <span className="text-xs font-semibold text-muted-foreground">Platform:</span>
-            {platforms.map((platform) => {
+            <span className="text-xs font-semibold text-muted-foreground">Filter by Platform:</span>
+            {allPlatforms.map((platform) => {
               const isChecked = selectedPlatforms.includes(platform)
-              const count = platformCounts[platform] || 0
-              const checkboxId = `fi-platform-${platform.toLowerCase()}`
-
+              const isEnabled = enabledPlatforms.includes(platform)
+              const count = claims.filter((c) => c.platform === platform).length
+              const isDisabled = !isEnabled || count === 0
               return (
                 <div key={platform} className="flex items-center space-x-2">
                   <Checkbox
-                    id={checkboxId}
-                    checked={isChecked}
-                    onCheckedChange={() => togglePlatform(platform)}
+                    id={`fi-platform-${platform.toLowerCase()}`}
+                    checked={isChecked && !isDisabled}
+                    onCheckedChange={() => { if (!isDisabled) togglePlatform(platform) }}
+                    disabled={isDisabled}
                   />
-                  <Label htmlFor={checkboxId} className="flex cursor-pointer items-center gap-1 text-xs font-normal">
+                  <Label
+                    htmlFor={`fi-platform-${platform.toLowerCase()}`}
+                    className={cn(
+                      'flex cursor-pointer items-center gap-1 text-xs font-normal',
+                      isDisabled && 'opacity-40 cursor-not-allowed'
+                    )}
+                  >
                     <span>{platform}</span>
                     <span className="text-muted-foreground">({count})</span>
                   </Label>
@@ -210,21 +385,67 @@ export default function FileIntakePage() {
             )}
           </div>
 
-          {/* Tabs + Table */}
-          {classifications.length > 0 ? (
-            <DynamicTabs
-              classifications={classifications}
-              counts={classificationCounts}
-              activeTab={activeTab}
-              onTabChange={setActiveTab}
-            >
-              <ClaimsTable claims={filteredClaims} />
-            </DynamicTabs>
-          ) : (
-            <div className="rounded-lg border border-dashed p-8 text-center">
-              <p className="text-xs text-muted-foreground">No claims match the selected platform filter</p>
-            </div>
-          )}
+          {/* Stats Grid */}
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+            {/* Platform Breakdown */}
+            <Card>
+              <CardContent className="p-4">
+                <h3 className="text-xs font-semibold mb-3">Breakdown by Platform</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left pb-2 font-medium text-muted-foreground">Platform</th>
+                      <th className="text-right pb-2 font-medium text-muted-foreground">Files</th>
+                      <th className="text-right pb-2 font-medium text-muted-foreground">Claims</th>
+                      <th className="text-right pb-2 font-medium text-muted-foreground">Total Billed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {platformBreakdown.map(({ platform, files, claims: claimCount, billed }) => (
+                      <tr key={platform} className="border-b border-border/50">
+                        <td className="py-2 font-medium">{platform}</td>
+                        <td className="py-2 text-right">{files}</td>
+                        <td className="py-2 text-right">{claimCount}</td>
+                        <td className="py-2 text-right">{formatCurrency(billed)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+
+            {/* Category Breakdown */}
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold">Breakdown by Category</h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    {filteredClaims.length} claims{selectedPlatforms.length > 0 ? ' (filtered)' : ''}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {categoryBreakdown.length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center py-4">No data</p>
+                  ) : (
+                    categoryBreakdown.map(({ category, count, percentage }) => (
+                      <div key={category} className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs">{category}</span>
+                          <span className="text-[10px] text-muted-foreground">{count} · {percentage}%</span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </section>
       )}
 
@@ -242,31 +463,40 @@ export default function FileIntakePage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="text-base">Upload Claims File</DialogTitle>
-            <DialogDescription className="text-xs">Select platform and upload XLS/XLSX file</DialogDescription>
+            <DialogDescription className="text-xs">Select platform and upload the platform-specific Excel file</DialogDescription>
           </DialogHeader>
 
           {/* Platform selector */}
           <div className="space-y-1.5">
             <Label className="text-xs">Platform</Label>
-            <Select
-              value={selectedPlatform}
-              onValueChange={(value) => setSelectedPlatform(value as Platform)}
-            >
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="Select platform..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Facet">Facet</SelectItem>
-                <SelectItem value="Amisys">Amisys</SelectItem>
-                <SelectItem value="Xcelys">Xcelys</SelectItem>
-              </SelectContent>
-            </Select>
+            {enabledPlatforms.length === 0 ? (
+              <div className="flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                  No data sources configured. Add a data source in the <a href="/data-sources" className="underline font-medium">Data Sources</a> page first.
+                </p>
+              </div>
+            ) : (
+              <Select
+                value={selectedPlatform}
+                onValueChange={(value) => setSelectedPlatform(value as Platform)}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Select platform..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {enabledPlatforms.map((platform) => (
+                    <SelectItem key={platform} value={platform}>{platform}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {/* Drop zone */}
           <div
             className={`flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-colors ${
-              selectedPlatform
+              selectedPlatform && enabledPlatforms.length > 0
                 ? 'border-primary/40 hover:border-primary hover:bg-primary/5'
                 : 'border-muted-foreground/20 opacity-50 cursor-not-allowed'
             }`}
@@ -281,9 +511,13 @@ export default function FileIntakePage() {
               <>
                 <Upload className="h-6 w-6 text-muted-foreground" />
                 <p className="mt-2 text-xs font-medium">
-                  {selectedPlatform ? 'Drop XLS file here, or click to browse' : 'Select a platform first'}
+                  {enabledPlatforms.length === 0
+                    ? 'Configure a data source first'
+                    : selectedPlatform
+                      ? 'Drop XLS file here, or click to browse'
+                      : 'Select a platform first'}
                 </p>
-                <p className="mt-1 text-[10px] text-muted-foreground">Accepts .xls and .xlsx up to 50MB</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">Accepts Excel files (.xls, .xlsx, .csv)</p>
               </>
             )}
           </div>
@@ -291,7 +525,7 @@ export default function FileIntakePage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xls,.xlsx"
+            accept=".xls,.xlsx,.csv"
             className="hidden"
             onChange={handleFileChange}
           />
@@ -305,8 +539,13 @@ export default function FileIntakePage() {
           )}
 
           <p className="text-[10px] text-muted-foreground">
-            Upload multiple files for different platforms. Claims accumulate across uploads.
+            Upload only platform specific XLS files
           </p>
+          {enabledPlatforms.length < 3 && (
+            <p className="text-[10px] text-muted-foreground">
+              Need another platform? <a href="/data-sources" className="text-primary underline font-medium">Add it in Data Sources</a> to enable it here.
+            </p>
+          )}
         </DialogContent>
       </Dialog>
     </div>

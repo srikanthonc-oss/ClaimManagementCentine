@@ -311,8 +311,14 @@ function parseClaimRow(
     // Handle percentage strings like "80%"
     const confStr = String(confidence).replace('%', '').trim()
     const confNum = parseNumber(confStr)
-    if (confNum !== null && confNum >= 0 && confNum <= 100) {
-      parsedConfidence = confNum
+    if (confNum !== null && confNum >= 0) {
+      // Excel stores percentages as decimals (0.8 = 80%)
+      // If value is <= 1, multiply by 100 to get the actual percentage
+      if (confNum > 0 && confNum <= 1) {
+        parsedConfidence = Math.round(confNum * 100)
+      } else if (confNum <= 100) {
+        parsedConfidence = Math.round(confNum)
+      }
     }
   }
 

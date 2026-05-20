@@ -3,7 +3,7 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Database, FileUp, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, Database, FileUp, ClipboardList, GitBranch, Bot, Layers, HelpCircle } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { cn } from '@/lib/utils'
 
@@ -16,8 +16,12 @@ interface NavLink {
 const navLinks: NavLink[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/data-sources', label: 'Data Sources', icon: Database },
-  { href: '/file-intake', label: 'File Intake', icon: FileUp },
-  { href: '/pend-processing', label: 'Pend Processing', icon: ClipboardList },
+  { href: '/file-intake', label: 'Claims File Intake', icon: FileUp },
+  { href: '/pend-processing', label: 'Claims Processing', icon: ClipboardList },
+  { href: '/cob', label: 'COB', icon: GitBranch },
+  { href: '/ai-functions', label: 'AI Functions', icon: Bot },
+  { href: '/data-ontology', label: 'Data Ontology', icon: Layers },
+  { href: '/help', label: 'Help & Training', icon: HelpCircle },
 ]
 
 export function Navigation() {

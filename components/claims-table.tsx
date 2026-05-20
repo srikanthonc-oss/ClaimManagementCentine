@@ -280,7 +280,7 @@ export function ClaimsTable({ claims, className }: ClaimsTableProps) {
                     </span>
                   </TableCell>
                   <TableCell className="text-right py-2">
-                    {formatConfidence(claim.confidence)}
+                    {claim.confidence || ''}
                   </TableCell>
                   <TableCell className="text-right py-2">
                     {formatDaysAged(claim.daysAged)}

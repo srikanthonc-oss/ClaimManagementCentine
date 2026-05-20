@@ -214,7 +214,6 @@ export const useUIStore = create<UIState>()(
       partialize: (state) => ({
         selectedPlatforms: state.selectedPlatforms,
       }),
-      skipHydration: true,
     }
   )
 )
