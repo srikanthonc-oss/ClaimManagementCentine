@@ -24,6 +24,15 @@ const COLUMN_MAPPING: Record<string, string> = {
   confidence: 'confidence',
   daysaged: 'daysAged',
   state: 'state',
+  holdcode: 'holdCode',
+  submittype: 'submitType',
+  claim_type: 'claimType',
+  providerspecialty: 'providerSpecialty',
+  allowedamount: 'allowedAmount',
+  subscriberid: 'subscriberId',
+  parflag: 'parFlag',
+  form: 'form',
+  recvdt: 'recvDt',
 }
 
 /**
@@ -35,7 +44,7 @@ const REQUIRED_COLUMNS = ['ClaimNumber', 'Classification', 'ProviderName', 'Bill
 /**
  * Optional columns that enhance the data but aren't required
  */
-const OPTIONAL_COLUMNS = ['Platform', 'Status', 'Confidence']
+const OPTIONAL_COLUMNS = ['Platform', 'Status', 'Confidence', 'HoldCode', 'SubmitType', 'CLAIM_TYPE', 'ProviderSpecialty', 'AllowedAmount', 'SubscriberId', 'ParFlag', 'Form', 'RecvDt']
 
 /**
  * Parses an XLS/XLSX file and extracts claims data
@@ -346,6 +355,17 @@ function parseClaimRow(
     return null
   }
 
+  // Extract optional fields
+  const holdCodeVal = columnIndices['HoldCode'] !== undefined ? getCellValue(row, columnIndices['HoldCode']) : null
+  const submitTypeVal = columnIndices['SubmitType'] !== undefined ? getCellValue(row, columnIndices['SubmitType']) : null
+  const claimTypeVal = columnIndices['CLAIM_TYPE'] !== undefined ? getCellValue(row, columnIndices['CLAIM_TYPE']) : null
+  const provSpecVal = columnIndices['ProviderSpecialty'] !== undefined ? getCellValue(row, columnIndices['ProviderSpecialty']) : null
+  const allowedAmtVal = columnIndices['AllowedAmount'] !== undefined ? getCellValue(row, columnIndices['AllowedAmount']) : null
+  const subscriberIdVal = columnIndices['SubscriberId'] !== undefined ? getCellValue(row, columnIndices['SubscriberId']) : null
+  const parFlagVal = columnIndices['ParFlag'] !== undefined ? getCellValue(row, columnIndices['ParFlag']) : null
+  const formVal = columnIndices['Form'] !== undefined ? getCellValue(row, columnIndices['Form']) : null
+  const recvDtVal = columnIndices['RecvDt'] !== undefined ? getCellValue(row, columnIndices['RecvDt']) : null
+
   // Create claim object
   const claim: Claim = {
     id: generateId(),
@@ -360,6 +380,16 @@ function parseClaimRow(
     state: stateStr,
     createdAt: now,
     updatedAt: now,
+    // Extended fields
+    holdCode: holdCodeVal ? String(holdCodeVal).trim() : undefined,
+    submitType: submitTypeVal ? String(submitTypeVal).trim() : undefined,
+    claimType: claimTypeVal ? String(claimTypeVal).trim() : undefined,
+    providerSpecialty: provSpecVal ? String(provSpecVal).trim() : undefined,
+    allowedAmount: allowedAmtVal ? parseNumber(allowedAmtVal) ?? undefined : undefined,
+    subscriberId: subscriberIdVal ? String(subscriberIdVal).trim() : undefined,
+    parFlag: parFlagVal ? String(parFlagVal).trim() : undefined,
+    form: formVal ? String(formVal).trim() : undefined,
+    recvDt: recvDtVal ? String(recvDtVal).trim() : undefined,
   }
 
   return claim

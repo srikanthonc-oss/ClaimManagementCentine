@@ -26,6 +26,16 @@ export interface Claim {
   state: string // US state code
   createdAt: Date
   updatedAt: Date
+  // Extended fields from upload
+  holdCode?: string
+  submitType?: string
+  claimType?: string
+  providerSpecialty?: string
+  allowedAmount?: number
+  subscriberId?: string
+  parFlag?: string
+  form?: string
+  recvDt?: string
 }
 
 export interface DataSource {

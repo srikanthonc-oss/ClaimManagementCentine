@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { useClaimsStore } from '@/stores/claims-store'
 import { formatCurrency } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import type { Claim, Classification } from '@/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,7 +15,10 @@ import {
   Activity,
   Zap,
   UserCheck,
-  ArrowRight,
+  Eye,
+  X,
+  Bot,
+  Clock,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -31,8 +35,27 @@ function formatCompactCurrency(amount: number): string {
 
 export default function DashboardPage() {
   const claims = useClaimsStore((state) => state.claims)
+  const [viewingClaim, setViewingClaim] = React.useState<Claim | null>(null)
 
-  // Compute metrics from the shared claims store (same data as pend processing)
+  // Count examiner decisions (claims manually approved/denied — confidence set to 100 by approve action)
+  const examinerDecisions = React.useMemo(() => {
+    return claims.filter((c) =>
+      (c.status === 'Approved' && c.confidence === 100) ||
+      (c.status === 'Denied' && c.confidence > 0 && c.confidence < 95)
+    ).length
+  }, [claims])
+
+  // Last updated timestamp
+  const lastUpdated = React.useMemo(() => {
+    if (claims.length === 0) return null
+    const dates = claims
+      .map((c) => c.updatedAt ? new Date(c.updatedAt).getTime() : 0)
+      .filter((d) => d > 0)
+    if (dates.length === 0) return null
+    return new Date(Math.max(...dates))
+  }, [claims])
+
+  // Compute metrics from the shared claims store
   const metrics = React.useMemo(() => {
     const total = claims.length
     const approved = claims.filter((c) => c.status === 'Approved').length
@@ -75,7 +98,7 @@ export default function DashboardPage() {
       }))
   }, [claims])
 
-  // HITL Queue — claims that need human review (denied or in review, sorted by confidence ascending)
+  // HITL Queue — claims that need human review
   const hitlQueue = React.useMemo(() => {
     return claims
       .filter((c) => c.status === 'Denied' || c.status === 'In Review')
@@ -85,21 +108,11 @@ export default function DashboardPage() {
 
   // Get reason text for HITL claims
   const getHITLReason = (claim: Claim): string => {
-    if (claim.classification === 'High Dollar') {
-      return 'High-dollar mandatory senior-reviewer sign-off'
-    }
-    if (claim.classification === 'Auth') {
-      return 'High-dollar auth — medical director sign-off required'
-    }
-    if (claim.classification === 'COB') {
-      return 'COB coordination — primary carrier verification needed'
-    }
-    if (claim.classification === 'Duplicate') {
-      return 'Potential duplicate — manual adjudication required'
-    }
-    if (claim.classification === 'DUAL') {
-      return 'Dual eligibility — cross-plan verification needed'
-    }
+    if (claim.classification === 'High Dollar') return 'High-dollar mandatory senior-reviewer sign-off'
+    if (claim.classification === 'Auth') return 'High-dollar auth — medical director sign-off required'
+    if (claim.classification === 'COB') return 'COB coordination — primary carrier verification needed'
+    if (claim.classification === 'Duplicate') return 'Potential duplicate — manual adjudication required'
+    if (claim.classification === 'DUAL') return 'Dual eligibility — cross-plan verification needed'
     return `${claim.classification} — manual review required`
   }
 
@@ -123,31 +136,23 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
+      {/* Header with last updated */}
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs text-primary font-medium">PendResolve AI · Operations</p>
           <h1 className="text-2xl font-bold mt-1">Pend Resolution Dashboard</h1>
           <p className="text-xs text-muted-foreground">Real-time view across core claims platforms, AI agents, and HITL workbenches.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/pend-processing">
-            <Button size="sm" className="h-8 gap-1.5 text-xs">
-              Open Pend Execution
-              <ArrowRight className="h-3 w-3" />
-            </Button>
-          </Link>
-          <Link href="/file-intake">
-            <Button size="sm" variant="outline" className="h-8 text-xs">
-              Claims Pend
-            </Button>
-          </Link>
-        </div>
+        {lastUpdated && (
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            Last updated: {lastUpdated.toLocaleDateString()} {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        )}
       </div>
 
       {/* Top Row - 4 Primary Metric Cards */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        {/* Pended Claims */}
         <Card>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
@@ -163,7 +168,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Auto-Resolved */}
         <Card>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
@@ -179,7 +183,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Needs HITL */}
         <Card>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
@@ -195,7 +198,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Pend Value at Risk */}
         <Card>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
@@ -244,7 +246,7 @@ export default function DashboardPage() {
               <UserCheck className="h-4 w-4 text-green-400" />
             </div>
             <div>
-              <p className="text-xl font-bold">0</p>
+              <p className="text-xl font-bold">{examinerDecisions}</p>
               <p className="text-[10px] text-muted-foreground">Examiner decisions recorded</p>
             </div>
           </CardContent>
@@ -282,7 +284,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* HITL Queue */}
+        {/* HITL Queue — clickable items */}
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-4">
@@ -299,7 +301,11 @@ export default function DashboardPage() {
                 <p className="text-xs text-muted-foreground text-center py-4">No claims in HITL queue</p>
               ) : (
                 hitlQueue.map((claim) => (
-                  <div key={claim.id} className="rounded-lg border p-3">
+                  <div
+                    key={claim.id}
+                    className="rounded-lg border p-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                    onClick={() => setViewingClaim(claim)}
+                  >
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs font-semibold">{claim.claimNumber}</p>
@@ -331,6 +337,64 @@ export default function DashboardPage() {
           <p className="text-[10px] text-muted-foreground">Processing {claims.length.toLocaleString()} claims today</p>
         </div>
       </div>
+
+      {/* Claim Detail Popup (from HITL Queue click) */}
+      {viewingClaim && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 overflow-auto">
+          <div className="fixed inset-0 bg-black/60" onClick={() => setViewingClaim(null)} />
+          <div className="relative z-50 w-full max-w-lg rounded-lg border bg-background p-6 shadow-2xl mb-10">
+            <button onClick={() => setViewingClaim(null)} className="absolute right-4 top-4 text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="flex items-center gap-2 mb-1">
+              <Bot className="h-5 w-5 text-primary" />
+              <h2 className="text-base font-bold">{viewingClaim.claimNumber}</h2>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">
+              {viewingClaim.classification} · {viewingClaim.platform} · {viewingClaim.state}
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="rounded-lg border p-3">
+                <p className="text-[10px] text-muted-foreground">Provider</p>
+                <p className="text-sm font-bold mt-0.5">{viewingClaim.providerName}</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-[10px] text-muted-foreground">Billed Amount</p>
+                <p className="text-sm font-bold mt-0.5">{formatCurrency(viewingClaim.billedAmount)}</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-[10px] text-muted-foreground">Confidence</p>
+                <p className={cn('text-sm font-bold mt-0.5',
+                  viewingClaim.confidence >= 95 ? 'text-green-400' :
+                  viewingClaim.confidence >= 80 ? 'text-yellow-400' : 'text-red-400'
+                )}>
+                  {viewingClaim.confidence > 0 ? `${viewingClaim.confidence}%` : '—'}
+                </p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-[10px] text-muted-foreground">Days Aged</p>
+                <p className="text-sm font-bold mt-0.5">{viewingClaim.daysAged}</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+              <p className="text-xs text-amber-400 font-medium">⚠ Requires Human Review</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{getHITLReason(viewingClaim)}</p>
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <Link href="/pend-processing" className="flex-1">
+                <Button size="sm" className="h-8 text-xs w-full gap-1.5">
+                  <Eye className="h-3 w-3" />
+                  Open in Claims Processing
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

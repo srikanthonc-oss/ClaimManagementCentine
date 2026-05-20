@@ -34,7 +34,7 @@ export function DataSourceForm({ dataSource, onSubmit, onCancel, className }: Da
   // Initialize endpoint from existing config
   React.useEffect(() => {
     if (dataSource) {
-      const config = dataSource.config as Record<string, unknown>
+      const config = dataSource.config as unknown as Record<string, unknown>
       setEndpoint(
         (config?.endpoint as string) ||
         (config?.baseUrl as string) ||
@@ -77,7 +77,7 @@ export function DataSourceForm({ dataSource, onSubmit, onCancel, className }: Da
     onSubmit({
       name: name.trim(),
       type,
-      config: config as DataSource['config'],
+      config: config as unknown as DataSource['config'],
       status: dataSource?.status || 'active',
       lastSync: dataSource?.lastSync,
     })

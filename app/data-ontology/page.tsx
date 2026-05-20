@@ -12,7 +12,19 @@ import {
   FileText,
   ShieldCheck,
   History,
+  Search,
+  FlaskConical,
+  Network,
 } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { ERDiagram } from '@/components/er-diagram'
 
 /** Field mapping entry */
@@ -156,10 +168,130 @@ const schemaChangelog: ChangelogEntry[] = [
   },
 ]
 
-type SectionKey = 'mapping' | 'taxonomy' | 'normalization' | 'validation' | 'changelog'
+type SectionKey = 'mapping' | 'taxonomy' | 'normalization' | 'validation' | 'changelog' | 'test' | 'er-diagram'
 
 export default function DataOntologyPage() {
   const [activeSection, setActiveSection] = React.useState<SectionKey>('mapping')
+  const [tableSearch, setTableSearch] = React.useState('')
+  const [testField, setTestField] = React.useState('')
+  const [testInput, setTestInput] = React.useState('')
+  const [testOutput, setTestOutput] = React.useState<string | null>(null)
+
+  // Filter field mappings by search
+  const filteredMappings = React.useMemo(() => {
+    if (!tableSearch.trim()) return fieldMappings
+    const q = tableSearch.toLowerCase()
+    return fieldMappings.filter((f) =>
+      f.canonical.toLowerCase().includes(q) ||
+      f.facet.toLowerCase().includes(q) ||
+      f.amisys.toLowerCase().includes(q) ||
+      f.xcelys.toLowerCase().includes(q) ||
+      f.type.toLowerCase().includes(q)
+    )
+  }, [tableSearch])
+
+  // Filter taxonomy by search
+  const filteredTaxonomy = React.useMemo(() => {
+    if (!tableSearch.trim()) return classificationTaxonomy
+    const q = tableSearch.toLowerCase()
+    return classificationTaxonomy.filter((t) =>
+      t.name.toLowerCase().includes(q) ||
+      t.code.toLowerCase().includes(q) ||
+      t.description.toLowerCase().includes(q)
+    )
+  }, [tableSearch])
+
+  // Filter normalization rules by search
+  const filteredNormRules = React.useMemo(() => {
+    if (!tableSearch.trim()) return normalizationRules
+    const q = tableSearch.toLowerCase()
+    return normalizationRules.filter((r) =>
+      r.field.toLowerCase().includes(q) ||
+      r.rule.toLowerCase().includes(q)
+    )
+  }, [tableSearch])
+
+  // Filter validation rules by search
+  const filteredValRules = React.useMemo(() => {
+    if (!tableSearch.trim()) return validationRules
+    const q = tableSearch.toLowerCase()
+    return validationRules.filter((r) =>
+      r.id.toLowerCase().includes(q) ||
+      r.name.toLowerCase().includes(q) ||
+      r.condition.toLowerCase().includes(q) ||
+      r.action.toLowerCase().includes(q)
+    )
+  }, [tableSearch])
+
+  // Test normalization logic
+  const runNormalization = () => {
+    if (!testField || !testInput.trim()) {
+      setTestOutput(null)
+      return
+    }
+    const input = testInput.trim()
+    let output = ''
+
+    switch (testField) {
+      case 'billedAmount': {
+        const cleaned = input.replace(/[$,]/g, '')
+        const num = parseFloat(cleaned)
+        output = isNaN(num) || num < 0 ? `❌ Error: Invalid amount "${input}"` : `✅ ${num}`
+        break
+      }
+      case 'status': {
+        const map: Record<string, string> = { pending: 'Pending', 'in progress': 'Pending', approved: 'Approved', completed: 'Approved', denied: 'Denied', rejected: 'Denied', 'in review': 'In Review' }
+        const result = map[input.toLowerCase()]
+        output = result ? `✅ ${result}` : `❌ Error: Unknown status "${input}"`
+        break
+      }
+      case 'confidence': {
+        const stripped = input.replace('%', '').trim()
+        const num = parseFloat(stripped)
+        if (isNaN(num)) { output = `❌ Error: Invalid number "${input}"`; break }
+        const final = num > 0 && num <= 1 ? Math.round(num * 100) : Math.round(num)
+        output = final >= 0 && final <= 100 ? `✅ ${final}` : `❌ Error: Out of range (0-100)`
+        break
+      }
+      case 'state': {
+        const upper = input.toUpperCase().trim().slice(0, 2)
+        output = upper.length === 2 ? `✅ ${upper}` : `❌ Error: Must be 2 characters`
+        break
+      }
+      case 'daysAged': {
+        const num = parseInt(input, 10)
+        output = isNaN(num) || num < 0 ? `❌ Error: Must be non-negative integer` : `✅ ${Math.floor(num)}`
+        break
+      }
+      case 'serviceDate': {
+        // Try MM/DD/YYYY
+        const mdyMatch = input.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+        if (mdyMatch) { output = `✅ ${mdyMatch[3]}-${mdyMatch[1].padStart(2, '0')}-${mdyMatch[2].padStart(2, '0')}`; break }
+        // Try YYYY-MM-DD
+        const isoMatch = input.match(/^\d{4}-\d{2}-\d{2}$/)
+        if (isoMatch) { output = `✅ ${input} (already ISO)`; break }
+        output = `❌ Error: Unrecognized date format "${input}"`
+        break
+      }
+      case 'classification': {
+        const lower = input.toLowerCase().trim()
+        const map: Record<string, string> = { dual: 'DUAL', duplicate: 'Duplicate', duilicate: 'Duplicate', cob: 'COB', pricing: 'Pricing', auth: 'Auth', 'corrected claims': 'Corrected Claims', corrected: 'Corrected Claims', 'high dollar': 'High Dollar', 'high doolar': 'High Dollar', 'other pend': 'Other Pend' }
+        const parts = input.split(/\s*\+\s*/)
+        const first = parts[0].toLowerCase().trim()
+        const result = map[lower] || map[first]
+        output = result ? `✅ ${result}${parts.length > 1 ? ` (split from "${input}")` : ''}` : `❌ Error: Unknown classification "${input}"`
+        break
+      }
+      case 'claimNumber': {
+        const trimmed = input.trim()
+        output = trimmed.length > 0 ? `✅ ${trimmed}` : `❌ Error: Empty claim number`
+        break
+      }
+      default:
+        output = `⚠ No normalization rule defined for "${testField}"`
+    }
+    setTestOutput(output)
+  }
 
   return (
     <div className="space-y-5">
@@ -235,11 +367,13 @@ export default function DataOntologyPage() {
           { key: 'taxonomy' as const, label: 'Classification Taxonomy' },
           { key: 'normalization' as const, label: 'Normalization Rules' },
           { key: 'validation' as const, label: 'Validation Rules' },
+          { key: 'test' as const, label: 'Test Normalization' },
+          { key: 'er-diagram' as const, label: 'ER Diagram' },
           { key: 'changelog' as const, label: 'Schema Changelog' },
         ].map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setActiveSection(tab.key)}
+            onClick={() => { setActiveSection(tab.key); setTableSearch('') }}
             className={cn(
               'px-4 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap',
               activeSection === tab.key
@@ -251,6 +385,19 @@ export default function DataOntologyPage() {
           </button>
         ))}
       </div>
+
+      {/* Search bar (shown for table tabs) */}
+      {['mapping', 'taxonomy', 'normalization', 'validation'].includes(activeSection) && (
+        <div className="relative max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            value={tableSearch}
+            onChange={(e) => setTableSearch(e.target.value)}
+            placeholder="Search in table..."
+            className="h-8 text-xs pl-8"
+          />
+        </div>
+      )}
 
       {/* Field Mapping Table */}
       {activeSection === 'mapping' && (
@@ -275,7 +422,7 @@ export default function DataOntologyPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {fieldMappings.map((field) => (
+                  {filteredMappings.map((field) => (
                     <tr key={field.canonical} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-2.5">
                         <span className="font-mono font-medium text-primary">{field.canonical}</span>
@@ -343,7 +490,7 @@ export default function DataOntologyPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {classificationTaxonomy.map((node) => (
+                  {filteredTaxonomy.map((node) => (
                     <tr key={node.code} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-2.5 font-medium">{node.name}</td>
                       <td className="px-4 py-2.5">
@@ -391,7 +538,7 @@ export default function DataOntologyPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {normalizationRules.map((rule) => (
+                  {filteredNormRules.map((rule) => (
                     <tr key={rule.field} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-2.5">
                         <span className="font-mono font-medium text-primary">{rule.field}</span>
@@ -436,7 +583,7 @@ export default function DataOntologyPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {validationRules.map((rule) => (
+                  {filteredValRules.map((rule) => (
                     <tr key={rule.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-2.5">
                         <span className="inline-flex rounded border px-1.5 py-0.5 text-[10px] font-mono">{rule.id}</span>
@@ -504,18 +651,129 @@ export default function DataOntologyPage() {
         </Card>
       )}
 
-      {/* Entity Relationship Diagram */}
-      <Card>
-        <CardContent className="p-4">
-          <h3 className="text-xs font-semibold mb-3">Entity Relationship Diagram</h3>
-          <p className="text-[10px] text-muted-foreground mb-3">
-            Visual data model showing how entities relate in the claims ontology. Drag nodes to rearrange layout. Use scroll to zoom and controls (bottom-left) to fit view.
-          </p>
-          <div className="relative">
-            <ERDiagram />
-          </div>
-        </CardContent>
-      </Card>
+      {/* Test Normalization */}
+      {activeSection === 'test' && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <FlaskConical className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-bold">Test Normalization</h3>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">
+              Enter a raw value and see how the normalization engine transforms it into the canonical format.
+            </p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Field selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Field</label>
+                <Select value={testField} onValueChange={(v) => { setTestField(v); setTestOutput(null) }}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Select field..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {normalizationRules.map((r) => (
+                      <SelectItem key={r.field} value={r.field}>{r.field}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Input value */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Raw Input</label>
+                <Input
+                  value={testInput}
+                  onChange={(e) => { setTestInput(e.target.value); setTestOutput(null) }}
+                  placeholder="Enter raw value..."
+                  className="h-9 text-xs"
+                  onKeyDown={(e) => { if (e.key === 'Enter') runNormalization() }}
+                />
+              </div>
+
+              {/* Run button */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">&nbsp;</label>
+                <Button
+                  onClick={runNormalization}
+                  disabled={!testField || !testInput.trim()}
+                  className="h-9 text-xs w-full"
+                >
+                  Normalize
+                </Button>
+              </div>
+            </div>
+
+            {/* Output */}
+            {testOutput && (
+              <div className={cn(
+                'mt-4 rounded-lg border p-4',
+                testOutput.startsWith('✅') ? 'border-green-500/30 bg-green-500/5' :
+                testOutput.startsWith('❌') ? 'border-red-500/30 bg-red-500/5' :
+                'border-amber-500/30 bg-amber-500/5'
+              )}>
+                <p className="text-xs font-medium mb-1">Result:</p>
+                <div className="flex items-center gap-2">
+                  <code className="text-xs font-mono text-muted-foreground">{testInput}</code>
+                  <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                  <code className="text-sm font-mono font-bold">{testOutput}</code>
+                </div>
+              </div>
+            )}
+
+            {/* Examples */}
+            {testField && (
+              <div className="mt-4 pt-4 border-t">
+                <p className="text-[10px] text-muted-foreground mb-2">Try these examples for <strong>{testField}</strong>:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {testField === 'billedAmount' && ['$1,234.56', '5000', '-100', 'abc'].map((ex) => (
+                    <button key={ex} onClick={() => { setTestInput(ex); setTestOutput(null) }} className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted">{ex}</button>
+                  ))}
+                  {testField === 'status' && ['pending', 'IN PROGRESS', 'Approved', 'rejected', 'unknown'].map((ex) => (
+                    <button key={ex} onClick={() => { setTestInput(ex); setTestOutput(null) }} className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted">{ex}</button>
+                  ))}
+                  {testField === 'confidence' && ['0.85', '92%', '75', '1.0', '150'].map((ex) => (
+                    <button key={ex} onClick={() => { setTestInput(ex); setTestOutput(null) }} className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted">{ex}</button>
+                  ))}
+                  {testField === 'state' && ['texas', 'FL', 'ca', 'X'].map((ex) => (
+                    <button key={ex} onClick={() => { setTestInput(ex); setTestOutput(null) }} className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted">{ex}</button>
+                  ))}
+                  {testField === 'daysAged' && ['14', '14.7', '-5', 'abc'].map((ex) => (
+                    <button key={ex} onClick={() => { setTestInput(ex); setTestOutput(null) }} className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted">{ex}</button>
+                  ))}
+                  {testField === 'serviceDate' && ['05/20/2025', '2025-05-20', '20-May-2025'].map((ex) => (
+                    <button key={ex} onClick={() => { setTestInput(ex); setTestOutput(null) }} className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted">{ex}</button>
+                  ))}
+                  {testField === 'classification' && ['COB', 'duilicate', 'COB + Duplicate', 'high doolar', 'unknown'].map((ex) => (
+                    <button key={ex} onClick={() => { setTestInput(ex); setTestOutput(null) }} className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted">{ex}</button>
+                  ))}
+                  {testField === 'claimNumber' && ['  CLM-001  ', 'CLM-002', ''].map((ex) => (
+                    <button key={ex} onClick={() => { setTestInput(ex || '(empty)'); setTestOutput(null) }} className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted">{ex || '(empty)'}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ER Diagram Tab */}
+      {activeSection === 'er-diagram' && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Network className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-bold">Entity Relationship Diagram</h3>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-3">
+              Visual data model showing how entities relate in the claims ontology. Drag nodes to rearrange layout. Use scroll to zoom and controls (bottom-left) to fit view.
+            </p>
+            <div className="relative">
+              <ERDiagram />
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

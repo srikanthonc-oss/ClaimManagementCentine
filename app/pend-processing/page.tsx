@@ -1,9 +1,11 @@
-'use client'
+﻿'use client'
 
 import * as React from 'react'
 import { useClaimsStore } from '@/stores/claims-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useDataSourcesStore } from '@/stores/data-sources-store'
+import { useAuthStore } from '@/stores/auth-store'
+import { useAgentResultsStore, generateAgentResult } from '@/stores/agent-results-store'
 import { cn, formatCurrency } from '@/lib/utils'
 import type { Claim, Platform, Classification } from '@/types'
 import {
@@ -15,60 +17,85 @@ import {
   Bot,
   Play,
   Loader2,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Search,
+  Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import { ClaimDetailView } from '@/components/claim-detail-view'
 
-// Simulated agent reasoning steps
+// Agent reasoning steps that vary by classification
 function generateReasoningSteps(claim: Claim) {
-  return [
+  const baseSteps = [
     {
-      agent: 'EligibilityAgent',
-      action: `${claim.classification} DETECTION`,
-      system: '',
-      time: '100ms',
-      status: 'complete' as const,
-      description: `Checking coverage for member (${claim.providerName})`,
-    },
-    {
-      agent: 'EligibilityAgent',
-      action: '270/271 ELIGIBILITY INQUIRY',
-      system: 'EDI GATEWAY (270/271)',
-      time: '1200ms',
-      status: 'complete' as const,
-      description: `Coverage verified — ${claim.platform} is primary carrier`,
-      detail: `primaryCarrier: ${claim.platform}  policyNumber: POL-${claim.claimNumber.slice(-6)}`,
-    },
-    {
-      agent: 'PricingAgent',
-      action: 'FEE SCHEDULE LOOKUP',
-      system: 'CLAIMS DB',
-      time: '450ms',
-      status: 'complete' as const,
-      description: `Billed amount ${formatCurrency(claim.billedAmount)} validated against fee schedule`,
-      detail: `allowedAmount: ${formatCurrency(claim.billedAmount * 0.65)}  variance: within threshold`,
-    },
-    {
-      agent: 'ComplianceAgent',
-      action: 'RULE ENGINE CHECK',
-      system: '',
-      time: '320ms',
-      status: 'complete' as const,
-      description: `All compliance rules passed for ${claim.classification} claim type`,
-    },
-    {
-      agent: 'ResolutionAgent',
-      action: 'AUTO-ADJUDICATION',
-      system: '',
+      agent: 'IntakeAdapter',
+      action: 'SCHEMA NORMALIZATION',
+      system: claim.platform,
       time: '80ms',
-      status: claim.confidence >= 95 ? 'complete' as const : 'warning' as const,
-      description: claim.confidence >= 95
-        ? `Claim auto-approved with ${claim.confidence}% confidence`
-        : `Claim flagged for manual review — confidence ${claim.confidence}%`,
+      status: 'complete' as const,
+      description: `Normalized ${claim.platform} fields to canonical schema`,
     },
   ]
+
+  // Classification-specific steps
+  const classificationSteps: Record<string, Array<{ agent: string; action: string; system: string; time: string; status: 'complete' | 'warning'; description: string; detail?: string }>> = {
+    COB: [
+      { agent: 'EligibilityAgent', action: '270/271 ELIGIBILITY INQUIRY', system: 'EDI GATEWAY', time: '1200ms', status: 'complete', description: `Verified other insurance for member via EDI 270/271`, detail: `primaryCarrier: ${claim.platform}  otherInsurance: detected` },
+      { agent: 'COBAgent', action: 'COORDINATION RULE CHECK', system: 'RULES ENGINE', time: '340ms', status: 'complete', description: `Applied NAIC birthday rule and MSP guidelines`, detail: `rule: birthday  result: ${claim.platform} is secondary` },
+      { agent: 'COBAgent', action: 'PRIMARY EOB RETRIEVAL', system: 'AWS S3 (claim-images)', time: '890ms', status: 'complete', description: `Retrieved primary EOB document from cloud storage` },
+      { agent: 'PricingAgent', action: 'SECONDARY CALCULATION', system: 'PRICING ENGINE', time: '450ms', status: 'complete', description: `Computed secondary payment: ${formatCurrency(claim.billedAmount * 0.35)}`, detail: `allowedAmount: ${formatCurrency(claim.billedAmount * 0.65)}  coinsurance: 35%` },
+    ],
+    Auth: [
+      { agent: 'EligibilityAgent', action: 'AUTH STATUS LOOKUP', system: 'AUTH DB', time: '320ms', status: 'complete', description: `Checked prior authorization status for claim`, detail: `authNumber: AUTH-${claim.claimNumber.slice(-6)}  status: verified` },
+      { agent: 'AuthAgent', action: 'AUTH-TO-CLAIM MATCHING', system: 'RULES ENGINE', time: '280ms', status: 'complete', description: `Validated authorization matches claim procedure codes` },
+      { agent: 'ComplianceAgent', action: 'TIMELY FILING CHECK', system: '', time: '150ms', status: 'complete', description: `Claim filed within ${claim.daysAged} days â€” within timely filing limit` },
+    ],
+    'High Dollar': [
+      { agent: 'PricingAgent', action: 'FEE SCHEDULE LOOKUP', system: 'CLAIMS DB', time: '450ms', status: 'complete', description: `Billed amount ${formatCurrency(claim.billedAmount)} exceeds high-dollar threshold`, detail: `threshold: $50,000  variance: ${((claim.billedAmount / 50000 - 1) * 100).toFixed(0)}% over` },
+      { agent: 'FraudAgent', action: 'FRAUD SCORING', system: 'ML PIPELINE', time: '680ms', status: 'complete', description: `Fraud risk assessment completed â€” no sanctions flags` },
+      { agent: 'ComplianceAgent', action: 'SENIOR REVIEWER ROUTING', system: '', time: '100ms', status: 'warning', description: `Routed to senior reviewer â€” high-dollar mandatory sign-off required` },
+    ],
+    Duplicate: [
+      { agent: 'DuplicateAgent', action: 'FUZZY MATCH SEARCH', system: 'CLAIMS DB', time: '560ms', status: 'complete', description: `Searched for duplicate claims by provider, amount, and date`, detail: `matchScore: 0.${85 + Math.floor(Math.random() * 10)}  potentialDuplicates: ${Math.floor(Math.random() * 3) + 1}` },
+      { agent: 'DuplicateAgent', action: 'CLAIM COMPARISON', system: '', time: '220ms', status: 'complete', description: `Compared claim details with potential matches` },
+      { agent: 'ComplianceAgent', action: 'DUPLICATE DETERMINATION', system: 'RULES ENGINE', time: '180ms', status: 'complete', description: `Applied duplicate detection rules â€” ${claim.confidence >= 95 ? 'confirmed duplicate' : 'inconclusive, needs review'}` },
+    ],
+    Pricing: [
+      { agent: 'PricingAgent', action: 'FEE SCHEDULE LOOKUP', system: 'CLAIMS DB', time: '450ms', status: 'complete', description: `Validated billed amount against contracted fee schedule`, detail: `billedAmount: ${formatCurrency(claim.billedAmount)}  allowedAmount: ${formatCurrency(claim.billedAmount * 0.72)}` },
+      { agent: 'PricingAgent', action: 'VARIANCE ANALYSIS', system: 'PRICING ENGINE', time: '320ms', status: 'complete', description: `Calculated pricing variance: ${((1 - 0.72) * 100).toFixed(0)}% â€” within acceptable range` },
+      { agent: 'ComplianceAgent', action: 'CONTRACT TERMS CHECK', system: '', time: '180ms', status: 'complete', description: `Verified provider contract terms and reimbursement methodology` },
+    ],
+    DUAL: [
+      { agent: 'EligibilityAgent', action: 'DUAL ELIGIBILITY CHECK', system: 'EDI GATEWAY', time: '980ms', status: 'complete', description: `Verified Medicare/Medicaid dual eligibility status`, detail: `medicare: active  medicaid: active  crossoverStatus: eligible` },
+      { agent: 'COBAgent', action: 'CROSSOVER DETERMINATION', system: 'RULES ENGINE', time: '340ms', status: 'complete', description: `Applied Medicare/Medicaid crossover rules` },
+      { agent: 'PricingAgent', action: 'SECONDARY PAYMENT CALC', system: 'PRICING ENGINE', time: '280ms', status: 'complete', description: `Computed Medicaid secondary payment after Medicare primary`, detail: `medicareAllowed: ${formatCurrency(claim.billedAmount * 0.8)}  medicaidResponsibility: ${formatCurrency(claim.billedAmount * 0.15)}` },
+    ],
+  }
+
+  const specificSteps = classificationSteps[claim.classification] || [
+    { agent: 'ComplianceAgent', action: 'RULE ENGINE CHECK', system: '', time: '320ms', status: 'complete' as const, description: `All compliance rules passed for ${claim.classification} claim type` },
+    { agent: 'PricingAgent', action: 'FEE SCHEDULE LOOKUP', system: 'CLAIMS DB', time: '450ms', status: 'complete' as const, description: `Billed amount ${formatCurrency(claim.billedAmount)} validated against fee schedule`, detail: `allowedAmount: ${formatCurrency(claim.billedAmount * 0.65)}` },
+  ]
+
+  // Final adjudication step
+  const adjudicationStep = {
+    agent: 'ResolutionAgent',
+    action: 'AUTO-ADJUDICATION',
+    system: '',
+    time: '80ms',
+    status: claim.confidence >= 95 ? 'complete' as const : 'warning' as const,
+    description: claim.confidence >= 95
+      ? `Claim auto-approved with ${claim.confidence}% confidence`
+      : `Claim flagged for manual review â€” confidence ${claim.confidence}%`,
+  }
+
+  return [...baseSteps, ...specificSteps, adjudicationStep]
 }
 
 export default function PendProcessingPage() {
@@ -78,11 +105,30 @@ export default function PendProcessingPage() {
   const togglePlatform = useUIStore((state) => state.togglePlatform)
   const clearPlatformFilters = useUIStore((state) => state.clearPlatformFilters)
   const dataSources = useDataSourcesStore((state) => state.dataSources)
+  const currentUser = useAuthStore((state) => state.currentUser)
+  const setAgentResult = useAgentResultsStore((state) => state.setResult)
+  const getAgentResult = useAgentResultsStore((state) => state.getResult)
 
-  const [activeTab, setActiveTab] = React.useState<'all' | 'auto-resolved' | 'needs-review'>('all')
+  const canExecute = currentUser?.role === 'admin' || currentUser?.role === 'examiner'
+
+  // Read routing thresholds from localStorage (same as AI Functions page)
+  const autoResolveThreshold = React.useMemo(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('ai-routing-thresholds')
+      if (stored) {
+        try { return (JSON.parse(stored) as { autoResolve: number }).autoResolve } catch { /* ignore */ }
+      }
+    }
+    return 92 // default
+  }, [])
+
+  const [activeTab, setActiveTab] = React.useState<'all' | 'auto-resolved' | 'needs-review' | 'approved' | 'denied' | 'pend-back'>('all')
   const [activeCategory, setActiveCategory] = React.useState<string>('all')
   const [viewingClaim, setViewingClaim] = React.useState<Claim | null>(null)
   const [isProcessing, setIsProcessing] = React.useState(false)
+  const [searchQuery, setSearchQuery] = React.useState('')
+  const [sortColumn, setSortColumn] = React.useState<string>('')
+  const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('asc')
   const [processedIds, setProcessedIds] = React.useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('processed-claim-ids')
@@ -102,26 +148,43 @@ export default function PendProcessingPage() {
 
   const allPlatforms: Platform[] = ['Facet', 'Amisys', 'Xcelys']
 
-  // Only show platforms that have an active data source configured
+  // Only show platforms that have an active data source AND user has access
   const enabledPlatforms = React.useMemo(() => {
     const activeSourceNames = dataSources
       .filter((ds) => ds.status === 'active')
       .map((ds) => ds.name)
-    return allPlatforms.filter((p) => activeSourceNames.includes(p))
-  }, [dataSources])
+    const fromSources = allPlatforms.filter((p) => activeSourceNames.includes(p))
+    // Admin has access to all, others only their assigned platforms
+    if (currentUser?.role === 'admin') return fromSources
+    const userPlatforms = currentUser?.platforms || []
+    return fromSources.filter((p) => userPlatforms.includes(p))
+  }, [dataSources, currentUser])
 
-  // Platform counts
+  // Platform counts â€” only for user's allowed platforms
   const platformCounts = React.useMemo(() => {
     const counts: Record<string, number> = { Facet: 0, Amisys: 0, Xcelys: 0 }
-    claims.forEach((c) => { counts[c.platform] = (counts[c.platform] || 0) + 1 })
+    const allowedPlatforms = currentUser?.role === 'admin'
+      ? allPlatforms
+      : (currentUser?.platforms || [])
+    claims.forEach((c) => {
+      if (allowedPlatforms.includes(c.platform)) {
+        counts[c.platform] = (counts[c.platform] || 0) + 1
+      }
+    })
     return counts
-  }, [claims])
+  }, [claims, currentUser])
 
-  // Step 1: Filter by platform — show nothing when none selected
+  // Step 1: Filter by platform â€” show nothing when none selected, restrict to user's platforms
   const platformFilteredClaims = React.useMemo(() => {
     if (selectedPlatforms.length === 0) return []
-    return claims.filter((c) => selectedPlatforms.includes(c.platform))
-  }, [claims, selectedPlatforms])
+    // Only show claims for platforms the user has access to
+    const allowedPlatforms = currentUser?.role === 'admin'
+      ? allPlatforms
+      : (currentUser?.platforms || [])
+    return claims.filter((c) =>
+      selectedPlatforms.includes(c.platform) && allowedPlatforms.includes(c.platform)
+    )
+  }, [claims, selectedPlatforms, currentUser])
 
   // Category data from platform-filtered claims (updates when platform changes)
   const categoryData = React.useMemo(() => {
@@ -140,23 +203,119 @@ export default function PendProcessingPage() {
 
   // Step 3: Filter by inventory/status tab (chained from category filter)
   const filteredClaims = React.useMemo(() => {
+    let result = categoryFilteredClaims
+
+    // Status filter
     switch (activeTab) {
       case 'auto-resolved':
-        return categoryFilteredClaims.filter((c) => processedIds.has(c.id) && c.confidence >= 95)
+        result = result.filter((c) => processedIds.has(c.id) && c.status === 'Approved' && c.confidence >= autoResolveThreshold && c.confidence < 100)
+        break
       case 'needs-review':
-        return categoryFilteredClaims.filter((c) => processedIds.has(c.id) && c.confidence < 95)
-      default:
-        return categoryFilteredClaims
+        result = result.filter((c) => processedIds.has(c.id) && c.status === 'In Review')
+        break
+      case 'approved':
+        result = result.filter((c) => c.status === 'Approved' && c.confidence === 100)
+        break
+      case 'denied':
+        result = result.filter((c) => c.status === 'Denied')
+        break
+      case 'pend-back':
+        result = result.filter((c) => c.status === 'Pending' && processedIds.has(c.id))
+        break
     }
-  }, [categoryFilteredClaims, activeTab, processedIds])
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter((c) =>
+        c.claimNumber.toLowerCase().includes(q) ||
+        c.providerName.toLowerCase().includes(q) ||
+        c.state.toLowerCase().includes(q)
+      )
+    }
+
+    // Sorting
+    if (sortColumn) {
+      result = [...result].sort((a, b) => {
+        let aVal: string | number = ''
+        let bVal: string | number = ''
+        switch (sortColumn) {
+          case 'claimNumber': aVal = a.claimNumber; bVal = b.claimNumber; break
+          case 'platform': aVal = a.platform; bVal = b.platform; break
+          case 'state': aVal = a.state; bVal = b.state; break
+          case 'classification': aVal = a.classification; bVal = b.classification; break
+          case 'providerName': aVal = a.providerName; bVal = b.providerName; break
+          case 'billedAmount': aVal = a.billedAmount; bVal = b.billedAmount; break
+          case 'confidence': aVal = a.confidence; bVal = b.confidence; break
+        }
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal
+        }
+        const cmp = String(aVal).localeCompare(String(bVal))
+        return sortDirection === 'asc' ? cmp : -cmp
+      })
+    }
+
+    return result
+  }, [categoryFilteredClaims, activeTab, processedIds, searchQuery, sortColumn, sortDirection])
+
+  // Toggle sort
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection((prev) => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortColumn(column)
+      setSortDirection('asc')
+    }
+  }
+
+  // Sort icon helper
+  const getSortIcon = (column: string) => {
+    if (sortColumn !== column) return <ArrowUpDown className="h-3 w-3 text-muted-foreground/50" />
+    return sortDirection === 'asc'
+      ? <ArrowUp className="h-3 w-3 text-primary" />
+      : <ArrowDown className="h-3 w-3 text-primary" />
+  }
+
+  // Export to CSV
+  const handleExport = () => {
+    if (filteredClaims.length === 0) return
+    const headers = ['Claim #', 'System', 'State', 'Category', 'Provider', 'Billed', 'Outcome', 'Confidence']
+    const rows = filteredClaims.map((c) => [
+      c.claimNumber,
+      c.platform,
+      c.state,
+      c.classification,
+      c.providerName,
+      c.billedAmount.toFixed(2),
+      processedIds.has(c.id) ? (c.confidence >= autoResolveThreshold ? 'Auto-Resolved' : c.status === 'Pending' ? 'Manual Processing' : c.status === 'Approved' ? 'Manual-Resolved' : c.status === 'Denied' ? 'Denied' : 'Pending Review') : 'Pending',
+      processedIds.has(c.id) ? `${c.confidence}%` : '',
+    ])
+    const csv = [headers.join(','), ...rows.map((r) => r.map((v) => `"${v}"`).join(','))].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `claims-export-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   // Metrics reflect the category-filtered level (platform + category applied)
   const metrics = React.useMemo(() => {
     const total = categoryFilteredClaims.length
     const executed = categoryFilteredClaims.filter((c) => processedIds.has(c.id)).length
-    const autoResolved = categoryFilteredClaims.filter((c) => processedIds.has(c.id) && c.confidence >= 95).length
-    const needsHITL = categoryFilteredClaims.filter((c) => processedIds.has(c.id) && c.confidence < 95).length
-    return { total, executed, autoResolved, needsHITL }
+    // Auto-resolved: system approved during processing (confidence was >= threshold originally)
+    const autoResolved = categoryFilteredClaims.filter((c) => processedIds.has(c.id) && c.status === 'Approved' && c.confidence >= autoResolveThreshold && c.confidence < 100).length
+    // Needs HITL: processed but confidence < 95 and still in review
+    const needsHITL = categoryFilteredClaims.filter((c) => processedIds.has(c.id) && c.status === 'In Review').length
+    // Manually approved by examiner (confidence set to 100)
+    const approved = categoryFilteredClaims.filter((c) => c.status === 'Approved' && c.confidence === 100).length
+    // Denied by examiner
+    const denied = categoryFilteredClaims.filter((c) => c.status === 'Denied').length
+    // Manual processing required (processed but AI cannot handle — status is Pending)
+    const pendBack = categoryFilteredClaims.filter((c) => c.status === 'Pending' && processedIds.has(c.id)).length
+    return { total, executed, autoResolved, needsHITL, approved, denied, pendBack }
   }, [categoryFilteredClaims, processedIds])
 
   // Reset category when platform changes and selected category no longer exists
@@ -167,7 +326,7 @@ export default function PendProcessingPage() {
     }
   }, [categoryData, activeCategory])
 
-  // Run Pend Processing — simulates agents running on filtered claims only
+  // Run Pend Processing â€” simulates agents running on filtered claims only
   const handleRunProcessing = () => {
     if (filteredClaims.length === 0 || isProcessing) return
     setIsProcessing(true)
@@ -182,20 +341,15 @@ export default function PendProcessingPage() {
       }
 
       const claim = claimsToProcess[index]
-      // Generate a confidence score based on claim characteristics
-      let confidence = Math.floor(Math.random() * 30) + 70 // 70-99 base range
+      // Generate agent result with simulated data
+      const agentResult = generateAgentResult(claim)
+      const confidence = agentResult.confidenceBreakdown.overall
 
-      // High dollar claims get lower confidence (need review)
-      if (claim.classification === 'High Dollar') {
-        confidence = Math.floor(Math.random() * 20) + 60 // 60-79
-      }
-      // Simple claims get higher confidence
-      if (claim.classification === 'Duplicate' || claim.classification === 'Pricing') {
-        confidence = Math.floor(Math.random() * 10) + 90 // 90-99
-      }
+      // Store agent result
+      setAgentResult(claim.claimNumber, agentResult)
 
       // Update claim with derived confidence and outcome
-      const outcome = confidence >= 95 ? 'Approved' : 'Pending'
+      const outcome = confidence >= autoResolveThreshold ? 'Approved' : 'In Review'
       updateClaim(claim.id, {
         confidence,
         status: outcome as Claim['status'],
@@ -214,7 +368,7 @@ export default function PendProcessingPage() {
     return (
       <div className="space-y-5">
         <div>
-          <h1 className="text-2xl font-bold">Pend Execution Workbench</h1>
+          <h1 className="text-2xl font-bold">Claim Execution Workbench</h1>
           <p className="text-xs text-muted-foreground">Upload pend inventory, run the agentic + automation engine, and review outcomes</p>
         </div>
         <div className="rounded-lg border border-dashed p-12 text-center">
@@ -231,30 +385,32 @@ export default function PendProcessingPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Pend Execution Workbench</h1>
+          <h1 className="text-2xl font-bold">Claim Execution Workbench</h1>
           <p className="text-xs text-muted-foreground">
             Upload pend inventory from Facets / QNXT / Amisys / Xcelys, run the agentic + automation engine, and review auto-resolved outcomes or claims that need human review.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            className="h-8 gap-1.5 text-xs bg-blue-600 hover:bg-blue-700"
-            onClick={handleRunProcessing}
-            disabled={isProcessing || filteredClaims.length === 0}
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Processing...
-              </>
-            ) : (
-              <>
-                <Play className="h-3.5 w-3.5" />
-                Run Pend Resolution
-              </>
-            )}
-          </Button>
+          {canExecute && (
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs bg-blue-600 hover:bg-blue-700"
+              onClick={handleRunProcessing}
+              disabled={isProcessing || filteredClaims.length === 0}
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Play className="h-3.5 w-3.5" />
+                  Run Pend Resolution
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -387,6 +543,65 @@ export default function PendProcessingPage() {
         >
           Needs Human Review ({metrics.needsHITL})
         </button>
+        <button
+          onClick={() => setActiveTab('approved')}
+          className={cn(
+            'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+            activeTab === 'approved'
+              ? 'bg-blue-600 text-white'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          )}
+        >
+          Manual-Resolved ({metrics.approved})
+        </button>
+        <button
+          onClick={() => setActiveTab('denied')}
+          className={cn(
+            'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+            activeTab === 'denied'
+              ? 'bg-red-600 text-white'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          )}
+        >
+          Denied ({metrics.denied})
+        </button>
+        <button
+          onClick={() => setActiveTab('pend-back')}
+          className={cn(
+            'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+            activeTab === 'pend-back'
+              ? 'bg-purple-600 text-white'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          )}
+        >
+          Manual Processing Required ({metrics.pendBack})
+        </button>
+      </div>
+
+      {/* Search + Export */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search claim #, provider, state..."
+            className="h-8 text-xs pl-8"
+          />
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          onClick={handleExport}
+          disabled={filteredClaims.length === 0}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export CSV
+        </Button>
+        <span className="text-[10px] text-muted-foreground ml-auto">
+          {filteredClaims.length} claims
+        </span>
       </div>
 
       {/* Claims Table */}
@@ -395,14 +610,28 @@ export default function PendProcessingPage() {
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-muted/80 backdrop-blur">
               <tr className="border-b">
-                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Claim #</th>
-                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">System</th>
-                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">State</th>
-                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Category</th>
-                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Provider</th>
-                <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Billed</th>
+                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('claimNumber')}>
+                  <span className="inline-flex items-center gap-1">Claim # {getSortIcon('claimNumber')}</span>
+                </th>
+                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('platform')}>
+                  <span className="inline-flex items-center gap-1">System {getSortIcon('platform')}</span>
+                </th>
+                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('state')}>
+                  <span className="inline-flex items-center gap-1">State {getSortIcon('state')}</span>
+                </th>
+                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('classification')}>
+                  <span className="inline-flex items-center gap-1">Category {getSortIcon('classification')}</span>
+                </th>
+                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('providerName')}>
+                  <span className="inline-flex items-center gap-1">Provider {getSortIcon('providerName')}</span>
+                </th>
+                <th className="text-right px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('billedAmount')}>
+                  <span className="inline-flex items-center gap-1 justify-end">Billed {getSortIcon('billedAmount')}</span>
+                </th>
                 <th className="text-center px-3 py-2.5 font-medium text-muted-foreground">Outcome</th>
-                <th className="text-center px-3 py-2.5 font-medium text-muted-foreground">Confidence</th>
+                <th className="text-center px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('confidence')}>
+                  <span className="inline-flex items-center gap-1">Confidence {getSortIcon('confidence')}</span>
+                </th>
                 <th className="text-center px-3 py-2.5 font-medium text-muted-foreground"></th>
               </tr>
             </thead>
@@ -433,11 +662,21 @@ export default function PendProcessingPage() {
                       {processed ? (
                         <span className={cn(
                           'inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium',
-                          claim.confidence >= 95
+                          claim.confidence >= autoResolveThreshold && claim.status === 'Approved'
                             ? 'bg-green-500/20 text-green-400'
+                            : claim.status === 'Denied'
+                            ? 'bg-red-500/20 text-red-400'
+                            : claim.status === 'Pending'
+                            ? 'bg-purple-500/20 text-purple-400'
+                            : claim.status === 'Approved' && claim.confidence === 100
+                            ? 'bg-blue-500/20 text-blue-400'
                             : 'bg-amber-500/20 text-amber-400'
                         )}>
-                          {claim.confidence >= 95 ? 'Auto-Resolved' : 'Pending Review'}
+                          {claim.confidence >= autoResolveThreshold && claim.status === 'Approved' && claim.confidence < 100 ? 'Auto-Resolved'
+                            : claim.status === 'Approved' && claim.confidence === 100 ? 'Manual-Resolved'
+                            : claim.status === 'Denied' ? 'Denied'
+                            : claim.status === 'Pending' ? 'Manual Processing'
+                            : 'Pending Review'}
                         </span>
                       ) : (
                         <span className="text-muted-foreground">Pending</span>
@@ -447,13 +686,13 @@ export default function PendProcessingPage() {
                       {processed ? (
                         <span className={cn(
                           'font-medium',
-                          claim.confidence >= 95 ? 'text-green-400' :
+                          claim.confidence >= autoResolveThreshold ? 'text-green-400' :
                           claim.confidence >= 80 ? 'text-yellow-400' : 'text-red-400'
                         )}>
                           {claim.confidence}%
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground">â€”</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-center">
@@ -487,7 +726,7 @@ export default function PendProcessingPage() {
           <div>
             <p className="text-xs font-medium text-blue-400">Running Pend Resolution Agents...</p>
             <p className="text-[10px] text-muted-foreground">
-              Processed {processedIds.size} of {filteredClaims.length} claims · Auto-resolved: {metrics.autoResolved} · Needs review: {metrics.needsHITL}
+              Processed {processedIds.size} of {filteredClaims.length} claims Â· Auto-resolved: {metrics.autoResolved} Â· Needs review: {metrics.needsHITL}
             </p>
           </div>
         </div>
@@ -495,139 +734,51 @@ export default function PendProcessingPage() {
 
       {/* Execution Detail Popup */}
       {viewingClaim && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 overflow-auto">
-          <div className="fixed inset-0 bg-black/60" onClick={() => setViewingClaim(null)} />
-          <div className="relative z-50 w-full max-w-2xl rounded-lg border bg-background p-6 shadow-2xl mb-10">
-            {/* Close */}
-            <button onClick={() => setViewingClaim(null)} className="absolute right-4 top-4 text-muted-foreground hover:text-foreground">
-              <X className="h-4 w-4" />
-            </button>
-
-            {/* Header */}
-            <div className="flex items-center gap-2 mb-1">
-              <Bot className="h-5 w-5 text-primary" />
-              <h2 className="text-base font-bold">Execution: {viewingClaim.claimNumber}</h2>
-            </div>
-            <p className="text-xs text-muted-foreground mb-4">
-              {viewingClaim.classification} · {viewingClaim.platform} · 5 agents executed
-            </p>
-
-            {/* Status Cards */}
-            <div className="grid grid-cols-3 gap-3 mb-5">
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] text-muted-foreground uppercase">Outcome</p>
-                {isClaimProcessed(viewingClaim.id) ? (
-                  <span className={cn('mt-1 inline-flex rounded px-2 py-0.5 text-xs font-bold',
-                    viewingClaim.confidence >= 95 ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'
-                  )}>
-                    {viewingClaim.confidence >= 95 ? 'AUTO-RESOLVED' : 'NEEDS REVIEW'}
-                  </span>
-                ) : (
-                  <span className="mt-1 inline-flex rounded px-2 py-0.5 text-xs font-bold bg-muted text-muted-foreground">
-                    NOT EXECUTED
-                  </span>
-                )}
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] text-muted-foreground uppercase">Confidence</p>
-                {isClaimProcessed(viewingClaim.id) ? (
-                  <p className={cn('mt-1 text-lg font-bold',
-                    viewingClaim.confidence >= 95 ? 'text-green-400' :
-                    viewingClaim.confidence >= 80 ? 'text-yellow-400' : 'text-red-400'
-                  )}>
-                    {viewingClaim.confidence}%
-                  </p>
-                ) : (
-                  <p className="mt-1 text-lg font-bold text-muted-foreground">—</p>
-                )}
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] text-muted-foreground uppercase">Billed Amount</p>
-                <p className="mt-1 text-lg font-bold">{formatCurrency(viewingClaim.billedAmount)}</p>
-              </div>
-            </div>
-
-            {/* Claim Details */}
-            <div className="grid grid-cols-2 gap-3 mb-5">
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] text-muted-foreground">Provider</p>
-                <p className="text-sm font-bold mt-0.5">{viewingClaim.providerName}</p>
-                <p className="text-[10px] text-muted-foreground">State: {viewingClaim.state} · Platform: {viewingClaim.platform}</p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] text-muted-foreground">Classification</p>
-                <p className="text-sm font-bold mt-0.5">{viewingClaim.classification}</p>
-                <p className="text-[10px] text-muted-foreground">Days Aged: {viewingClaim.daysAged}</p>
-              </div>
-            </div>
-
-            {/* Agent Reasoning Trace */}
-            {isClaimProcessed(viewingClaim.id) ? (
-              <>
-                <div className="mb-2 flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-primary" />
-                  <h3 className="text-xs font-bold uppercase tracking-wide">Agent Reasoning Trace</h3>
-                </div>
-
-                <div className="space-y-3">
-                  {generateReasoningSteps(viewingClaim).map((step, i) => (
-                    <div key={i} className="flex gap-3">
-                      <div className="flex flex-col items-center">
-                        <div className={cn('h-2.5 w-2.5 rounded-full mt-1',
-                          step.status === 'complete' ? 'bg-green-500' : 'bg-yellow-500'
-                        )} />
-                        {i < 4 && <div className="w-px flex-1 bg-border mt-1" />}
-                      </div>
-                      <div className="flex-1 pb-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-semibold">{step.agent}</span>
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">{step.action}</span>
-                          {step.system && (
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">{step.system}</span>
-                          )}
-                          <span className="text-[10px] text-muted-foreground ml-auto">{step.time}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">{step.description}</p>
-                        {step.detail && (
-                          <div className="mt-1.5 rounded bg-muted/50 border px-2 py-1.5">
-                            <code className="text-[10px] text-muted-foreground">{step.detail}</code>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="rounded-lg border border-dashed p-6 text-center">
-                <Bot className="mx-auto h-6 w-6 text-muted-foreground" />
-                <p className="mt-2 text-xs text-muted-foreground">Agent reasoning trace will appear after execution</p>
-                <p className="text-[10px] text-muted-foreground mt-1">Click &quot;Run Pend Resolution&quot; to process this claim</p>
-              </div>
-            )}
-
-            {/* Action for needs-review claims */}
-            {isClaimProcessed(viewingClaim.id) && viewingClaim.confidence < 95 && (
-              <div className="mt-4 pt-4 border-t">
-                <p className="text-xs text-amber-400 mb-2">⚠ This claim requires human review (confidence below 95%)</p>
-                <div className="flex gap-2">
-                  <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => {
-                    updateClaim(viewingClaim.id, { status: 'Approved', confidence: 100 })
-                    setViewingClaim(null)
-                  }}>
-                    Approve
-                  </Button>
-                  <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => {
-                    updateClaim(viewingClaim.id, { status: 'Denied' })
-                    setViewingClaim(null)
-                  }}>
-                    Deny
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <ClaimDetailView
+          claim={viewingClaim}
+          processed={isClaimProcessed(viewingClaim.id)}
+          canExecute={canExecute}
+          onClose={() => setViewingClaim(null)}
+          onApprove={(notes) => {
+            updateClaim(viewingClaim.id, { status: 'Approved', confidence: 100 })
+            // Save examiner decision
+            const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
+            if (existing) {
+              setAgentResult(viewingClaim.claimNumber, {
+                ...existing,
+                examinerDecision: { action: 'approve', notes, decidedBy: currentUser?.name || '', decidedAt: new Date().toISOString() }
+              })
+            }
+            setViewingClaim(null)
+          }}
+          onDeny={(notes) => {
+            // Check if it's a manual review action
+            if (notes.startsWith('[MANUAL-REVIEW:')) {
+              updateClaim(viewingClaim.id, { status: 'Pending' })
+              const reason = notes.match(/\[MANUAL-REVIEW: (.*?)\]/)?.[1] || ''
+              const cleanNotes = notes.replace(/\[MANUAL-REVIEW:.*?\]\s*/, '')
+              const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
+              if (existing) {
+                setAgentResult(viewingClaim.claimNumber, {
+                  ...existing,
+                  examinerDecision: { action: 'manual-review', reason, notes: cleanNotes, decidedBy: currentUser?.name || '', decidedAt: new Date().toISOString() }
+                })
+              }
+            } else {
+              updateClaim(viewingClaim.id, { status: 'Denied' })
+              const reason = notes.match(/\[(.*?)\]/)?.[1] || ''
+              const cleanNotes = notes.replace(/\[.*?\]\s*/, '')
+              const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
+              if (existing) {
+                setAgentResult(viewingClaim.claimNumber, {
+                  ...existing,
+                  examinerDecision: { action: 'deny', reason, notes: cleanNotes, decidedBy: currentUser?.name || '', decidedAt: new Date().toISOString() }
+                })
+              }
+            }
+            setViewingClaim(null)
+          }}
+        />
       )}
     </div>
   )

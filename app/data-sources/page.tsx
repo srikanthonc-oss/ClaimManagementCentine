@@ -24,6 +24,7 @@ import { DataSourceList } from '@/components/data-source-list'
 import { DataSourceForm } from '@/components/data-source-form'
 import { ErrorDisplay } from '@/components/error-display'
 import { useDataSourcesStore } from '@/stores/data-sources-store'
+import { useAuthStore } from '@/stores/auth-store'
 import type { DataSource } from '@/types'
 
 /**
@@ -50,6 +51,8 @@ export default function DataSourcesPage() {
   const updateDataSource = useDataSourcesStore((state) => state.updateDataSource)
   const deleteDataSource = useDataSourcesStore((state) => state.deleteDataSource)
   const getDataSourceById = useDataSourcesStore((state) => state.getDataSourceById)
+  const currentUser = useAuthStore((state) => state.currentUser)
+  const isAdmin = currentUser?.role === 'admin'
 
   // Dialog state
   const [isFormDialogOpen, setIsFormDialogOpen] = React.useState(false)
@@ -184,10 +187,12 @@ export default function DataSourcesPage() {
             Manage data source connections for claims processing
           </p>
         </div>
-        <Button onClick={handleAddClick} aria-label="Add new data source">
-          <Plus className="mr-2 h-4 w-4" />
-          Add Data Source
-        </Button>
+        {isAdmin && (
+          <Button onClick={handleAddClick} aria-label="Add new data source">
+            <Plus className="mr-2 h-4 w-4" />
+            Add Data Source
+          </Button>
+        )}
       </div>
 
       {/* Error Display */}

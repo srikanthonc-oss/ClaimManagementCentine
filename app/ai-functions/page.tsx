@@ -2,9 +2,12 @@
 
 import * as React from 'react'
 import { useClaimsStore } from '@/stores/claims-store'
+import { useAuthStore } from '@/stores/auth-store'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { Input } from '@/components/ui/input'
+import { cn, formatCurrency } from '@/lib/utils'
+import type { Claim } from '@/types'
 import {
   Bot,
   Activity,
@@ -18,6 +21,8 @@ import {
   Users,
   ToggleLeft,
   ToggleRight,
+  FlaskConical,
+  Loader2,
 } from 'lucide-react'
 
 /** AI Function definition */
@@ -108,9 +113,42 @@ const aiFunctions: AIFunction[] = [
 
 export default function AIFunctionsPage() {
   const claims = useClaimsStore((state) => state.claims)
-  const [enabledFunctions, setEnabledFunctions] = React.useState<Set<string>>(
-    () => new Set(aiFunctions.map((f) => f.id))
-  )
+  const currentUser = useAuthStore((state) => state.currentUser)
+  const isAdmin = currentUser?.role === 'admin'
+
+  // Persist enabled functions to localStorage
+  const [enabledFunctions, setEnabledFunctions] = React.useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('ai-functions-enabled')
+      if (stored) {
+        try { return new Set(JSON.parse(stored) as string[]) } catch { /* ignore */ }
+      }
+    }
+    return new Set(aiFunctions.map((f) => f.id))
+  })
+
+  React.useEffect(() => {
+    localStorage.setItem('ai-functions-enabled', JSON.stringify([...enabledFunctions]))
+  }, [enabledFunctions])
+
+  // Persist editable thresholds to localStorage
+  const [thresholds, setThresholds] = React.useState<{ autoResolve: number; hitlLow: number }>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('ai-routing-thresholds')
+      if (stored) {
+        try { return JSON.parse(stored) } catch { /* ignore */ }
+      }
+    }
+    return { autoResolve: 92, hitlLow: 60 }
+  })
+
+  React.useEffect(() => {
+    localStorage.setItem('ai-routing-thresholds', JSON.stringify(thresholds))
+  }, [thresholds])
+
+  // Test function state
+  const [testingFn, setTestingFn] = React.useState<string | null>(null)
+  const [testResult, setTestResult] = React.useState<{ fnId: string; confidence: number; decision: string; latency: number } | null>(null)
 
   const toggleFunction = (id: string) => {
     setEnabledFunctions((prev) => {
@@ -144,6 +182,20 @@ export default function AIFunctionsPage() {
       : 0
     return { active, total, totalInvocations, avgSuccess: Math.round(avgSuccess * 10) / 10 }
   }, [enabledFunctions, getStats])
+
+  // Test a function on a sample claim
+  const handleTestFunction = (fnId: string) => {
+    setTestingFn(fnId)
+    setTestResult(null)
+
+    setTimeout(() => {
+      const confidence = Math.floor(Math.random() * 30) + 70
+      const decision = confidence >= thresholds.autoResolve ? 'Auto-Resolve' : confidence >= thresholds.hitlLow ? 'HITL Review' : 'Force HITL'
+      const latency = Math.floor(Math.random() * 500) + 100
+      setTestResult({ fnId, confidence, decision, latency })
+      setTestingFn(null)
+    }, 1200)
+  }
 
   return (
     <div className="space-y-5">
@@ -201,6 +253,7 @@ export default function AIFunctionsPage() {
                   <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Success Rate</th>
                   <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Avg Latency</th>
                   <th className="text-center px-4 py-2.5 font-medium text-muted-foreground">Status</th>
+                  <th className="text-center px-4 py-2.5 font-medium text-muted-foreground">Test</th>
                 </tr>
               </thead>
               <tbody>
@@ -245,9 +298,10 @@ export default function AIFunctionsPage() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button
-                          onClick={() => toggleFunction(fn.id)}
-                          className="inline-flex items-center gap-1"
+                          onClick={() => isAdmin && toggleFunction(fn.id)}
+                          className={cn('inline-flex items-center gap-1', !isAdmin && 'opacity-50 cursor-not-allowed')}
                           aria-label={`Toggle ${fn.name}`}
+                          disabled={!isAdmin}
                         >
                           {isEnabled ? (
                             <ToggleRight className="h-5 w-5 text-green-500" />
@@ -255,6 +309,21 @@ export default function AIFunctionsPage() {
                             <ToggleLeft className="h-5 w-5 text-muted-foreground" />
                           )}
                         </button>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[10px]"
+                          onClick={() => handleTestFunction(fn.id)}
+                          disabled={testingFn === fn.id || !isEnabled}
+                        >
+                          {testingFn === fn.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <FlaskConical className="h-3 w-3" />
+                          )}
+                        </Button>
                       </td>
                     </tr>
                   )
@@ -265,34 +334,95 @@ export default function AIFunctionsPage() {
         </CardContent>
       </Card>
 
-      {/* Threshold Configuration */}
+      {/* Test Result */}
+      {testResult && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <FlaskConical className="h-4 w-4 text-primary" />
+              <h3 className="text-xs font-semibold">Test Result — {aiFunctions.find((f) => f.id === testResult.fnId)?.name}</h3>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="rounded-lg border p-3">
+                <p className="text-[10px] text-muted-foreground">Confidence Score</p>
+                <p className={cn('text-lg font-bold mt-0.5',
+                  testResult.confidence >= thresholds.autoResolve ? 'text-green-400' :
+                  testResult.confidence >= thresholds.hitlLow ? 'text-yellow-400' : 'text-red-400'
+                )}>
+                  {testResult.confidence}%
+                </p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-[10px] text-muted-foreground">Decision</p>
+                <span className={cn('mt-0.5 inline-flex rounded px-2 py-0.5 text-xs font-bold',
+                  testResult.decision === 'Auto-Resolve' ? 'bg-green-500/20 text-green-400' :
+                  testResult.decision === 'HITL Review' ? 'bg-amber-500/20 text-amber-400' :
+                  'bg-red-500/20 text-red-400'
+                )}>
+                  {testResult.decision}
+                </span>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-[10px] text-muted-foreground">Latency</p>
+                <p className="text-lg font-bold mt-0.5">{testResult.latency}ms</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Editable Threshold Configuration */}
       <Card>
         <CardContent className="p-4">
           <h3 className="text-xs font-semibold mb-3">Routing Thresholds (Global)</h3>
           <div className="grid grid-cols-3 gap-4">
             <div className="rounded-lg border p-3">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-2">
                 <span className="h-2 w-2 rounded-full bg-green-500" />
                 <span className="text-xs font-medium">Auto-Resolve</span>
               </div>
-              <p className="text-lg font-bold">≥ 92%</p>
-              <p className="text-[10px] text-muted-foreground">Confidence threshold for auto-approval</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">≥</span>
+                <Input
+                  type="number"
+                  min={60}
+                  max={100}
+                  value={thresholds.autoResolve}
+                  onChange={(e) => setThresholds((prev) => ({ ...prev, autoResolve: Math.min(100, Math.max(prev.hitlLow + 1, parseInt(e.target.value) || 0)) }))}
+                  className="h-8 w-16 text-xs text-center"
+                  disabled={!isAdmin}
+                />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-2">Confidence threshold for auto-approval</p>
             </div>
             <div className="rounded-lg border p-3">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-2">
                 <span className="h-2 w-2 rounded-full bg-amber-500" />
                 <span className="text-xs font-medium">HITL Review</span>
               </div>
-              <p className="text-lg font-bold">60–92%</p>
-              <p className="text-[10px] text-muted-foreground">Routed to human reviewer</p>
+              <p className="text-lg font-bold">{thresholds.hitlLow}–{thresholds.autoResolve - 1}%</p>
+              <p className="text-[10px] text-muted-foreground mt-2">Routed to human reviewer</p>
             </div>
             <div className="rounded-lg border p-3">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-2">
                 <span className="h-2 w-2 rounded-full bg-red-500" />
                 <span className="text-xs font-medium">Force HITL</span>
               </div>
-              <p className="text-lg font-bold">&lt; 60%</p>
-              <p className="text-[10px] text-muted-foreground">Mandatory human decision</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">&lt;</span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={90}
+                  value={thresholds.hitlLow}
+                  onChange={(e) => setThresholds((prev) => ({ ...prev, hitlLow: Math.min(prev.autoResolve - 1, Math.max(0, parseInt(e.target.value) || 0)) }))}
+                  className="h-8 w-16 text-xs text-center"
+                  disabled={!isAdmin}
+                />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-2">Mandatory human decision</p>
             </div>
           </div>
         </CardContent>

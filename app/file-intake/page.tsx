@@ -1,9 +1,11 @@
 'use client'
 
 import * as React from 'react'
+import { useRouter } from 'next/navigation'
 import { useClaimsStore, type UploadRecord } from '@/stores/claims-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useDataSourcesStore } from '@/stores/data-sources-store'
+import { useAuthStore } from '@/stores/auth-store'
 import { parseXLSFile } from '@/lib/xls-parser'
 import { formatCurrency, cn } from '@/lib/utils'
 import type { FileUploadResult, Classification, Platform } from '@/types'
@@ -39,6 +41,7 @@ import {
 } from '@/components/ui/dialog'
 
 export default function FileIntakePage() {
+  const router = useRouter()
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [selectedPlatform, setSelectedPlatform] = React.useState<Platform | ''>('')
   const [isProcessing, setIsProcessing] = React.useState(false)
@@ -58,16 +61,21 @@ export default function FileIntakePage() {
   const togglePlatform = useUIStore((state) => state.togglePlatform)
   const clearPlatformFilters = useUIStore((state) => state.clearPlatformFilters)
   const dataSources = useDataSourcesStore((state) => state.dataSources)
+  const currentUser = useAuthStore((state) => state.currentUser)
 
   const allPlatforms: Platform[] = ['Facet', 'Amisys', 'Xcelys']
 
-  // Available platforms come from active data sources only
+  // Available platforms: must have active data source AND user must have access
   const enabledPlatforms = React.useMemo(() => {
     const activeSourceNames = dataSources
       .filter((ds) => ds.status === 'active')
       .map((ds) => ds.name)
-    return allPlatforms.filter((p) => activeSourceNames.includes(p))
-  }, [dataSources])
+    const fromSources = allPlatforms.filter((p) => activeSourceNames.includes(p))
+    // Admin has access to all, others only their assigned platforms
+    if (currentUser?.role === 'admin') return fromSources
+    const userPlatforms = currentUser?.platforms || []
+    return fromSources.filter((p) => userPlatforms.includes(p))
+  }, [dataSources, currentUser])
 
   // Filter claims by selected platforms for stats — empty when none selected
   const filteredClaims = React.useMemo(() => {
@@ -208,7 +216,7 @@ export default function FileIntakePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {claims.length > 0 && (
+          {claims.length > 0 && currentUser?.role === 'admin' && (
             <Button
               size="sm"
               variant="ghost"
@@ -219,10 +227,12 @@ export default function FileIntakePage() {
               Clear All
             </Button>
           )}
-          <Button size="sm" className="h-8 gap-2 text-xs" onClick={() => setIsDialogOpen(true)}>
-            <Upload className="h-3.5 w-3.5" />
-            Upload File
-          </Button>
+          {(currentUser?.role === 'admin' || currentUser?.role === 'examiner') && (
+            <Button size="sm" className="h-8 gap-2 text-xs" onClick={() => setIsDialogOpen(true)}>
+              <Upload className="h-3.5 w-3.5" />
+              Upload File
+            </Button>
+          )}
         </div>
       </div>
 
@@ -473,7 +483,7 @@ export default function FileIntakePage() {
               <div className="flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2">
                 <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
                 <p className="text-[10px] text-amber-600 dark:text-amber-400">
-                  No data sources configured. Add a data source in the <a href="/data-sources" className="underline font-medium">Data Sources</a> page first.
+                  No data sources configured. Add a data source in the <button onClick={() => { setIsDialogOpen(false); router.push('/data-sources') }} className="underline font-medium">Data Sources</button> page first.
                 </p>
               </div>
             ) : (
@@ -543,7 +553,7 @@ export default function FileIntakePage() {
           </p>
           {enabledPlatforms.length < 3 && (
             <p className="text-[10px] text-muted-foreground">
-              Need another platform? <a href="/data-sources" className="text-primary underline font-medium">Add it in Data Sources</a> to enable it here.
+              Need another platform? <button onClick={() => { setIsDialogOpen(false); router.push('/data-sources') }} className="text-primary underline font-medium">Add it in Data Sources</button> to enable it here.
             </p>
           )}
         </DialogContent>
