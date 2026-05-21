@@ -2,14 +2,13 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { useClaimsStore, type UploadRecord } from '@/stores/claims-store'
 import { api } from '@/lib/api'
 import { useUIStore } from '@/stores/ui-store'
 import { useDataSourcesStore } from '@/stores/data-sources-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { parseXLSFile } from '@/lib/xls-parser'
 import { formatCurrency, cn } from '@/lib/utils'
-import type { FileUploadResult, Classification, Platform } from '@/types'
+import type { FileUploadResult, Classification, Platform, Claim } from '@/types'
 import {
   Upload,
   FileSpreadsheet,
@@ -51,28 +50,66 @@ export default function FileIntakePage() {
   const [fileName, setFileName] = React.useState('')
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
-  // Stores
-  const claims = useClaimsStore((state) => state.claims)
-  const uploads = useClaimsStore((state) => state.uploads)
-  const addClaims = useClaimsStore((state) => state.addClaims)
-  const addUpload = useClaimsStore((state) => state.addUpload)
-  const removeUpload = useClaimsStore((state) => state.removeUpload)
-  const clearClaims = useClaimsStore((state) => state.clearClaims)
+  // Local state instead of Zustand
+  const [claims, setClaims] = React.useState<Claim[]>([])
+  const [uploads, setUploads] = React.useState<any[]>([])
   const selectedPlatforms = useUIStore((state) => state.selectedPlatforms)
   const togglePlatform = useUIStore((state) => state.togglePlatform)
   const clearPlatformFilters = useUIStore((state) => state.clearPlatformFilters)
   const dataSources = useDataSourcesStore((state) => state.dataSources)
+  const fetchDataSources = useDataSourcesStore((state) => state.fetchDataSources)
   const currentUser = useAuthStore((state) => state.currentUser)
+
+  // Fetch claims and upload history from API on mount
+  React.useEffect(() => {
+    fetchDataSources()
+
+    api.claims.list({ pageSize: '500' })
+      .then((data) => {
+        if (data?.claims) {
+          setClaims(data.claims.map((c: any) => ({
+            id: c.id,
+            claimNumber: c.claim_number,
+            classification: c.classification,
+            platform: c.platform,
+            providerName: c.provider_name,
+            billedAmount: c.billed_amount,
+            status: c.status === 'InReview' ? 'In Review' : c.status,
+            confidence: c.confidence || 0,
+            daysAged: c.days_aged,
+            state: c.state,
+            createdAt: c.created_at,
+            updatedAt: c.updated_at,
+          })))
+        }
+      })
+      .catch(() => {})
+
+    api.claims.uploads()
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setUploads(data.map((u: any) => ({
+            id: u.id,
+            fileName: u.file_name,
+            platform: u.platform,
+            uploadedAt: u.uploaded_at,
+            claimsCount: u.claims_count,
+            status: 'processed',
+            duplicatesSkipped: u.duplicates_skipped || 0,
+          })))
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const allPlatforms: Platform[] = ['Facet', 'Amisys', 'Xcelys']
 
-  // Available platforms: must have active data source AND user must have access
+  // Available platforms — only those with active data source configured
   const enabledPlatforms = React.useMemo(() => {
     const activeSourceNames = dataSources
       .filter((ds) => ds.status === 'active')
       .map((ds) => ds.name)
     const fromSources = allPlatforms.filter((p) => activeSourceNames.includes(p))
-    // Admin has access to all, others only their assigned platforms
     if (currentUser?.role === 'admin') return fromSources
     const userPlatforms = currentUser?.platforms || []
     return fromSources.filter((p) => userPlatforms.includes(p))
@@ -153,6 +190,7 @@ export default function FileIntakePage() {
 
     try {
       const result = await parseXLSFile(file)
+      console.log('[FileIntake] Parse result:', result.success, 'claims:', result.claims.length, 'errors:', result.errors.length)
 
       // Assign selected platform to all parsed claims
       if (result.claims.length > 0 && selectedPlatform) {
@@ -169,23 +207,42 @@ export default function FileIntakePage() {
         const existingIds = new Set(claims.map((c) => c.id))
         const dupes = result.claims.filter((c) => existingIds.has(c.id)).length
 
-        // Add claims to store
-        addClaims(result.claims)
-
-        // Sync with backend API
-        api.claims.upload(result.claims, file.name, selectedPlatform as string).catch(() => { /* silent fallback */ })
-
-        // Record the upload
-        const uploadRecord: UploadRecord = {
-          id: `upload-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-          fileName: file.name,
-          platform: selectedPlatform as Platform,
-          uploadedAt: new Date().toISOString(),
-          claimsCount: result.claims.length,
-          status: 'processed',
-          duplicatesSkipped: dupes,
-        }
-        addUpload(uploadRecord)
+        // Upload to backend API (source of truth)
+        api.claims.upload(result.claims, file.name, selectedPlatform as string)
+          .then((resp) => {
+            console.log('[Upload] Success:', resp)
+            // Add upload to local history
+            setUploads((prev) => [{
+              id: resp.upload_id || `upload-${Date.now()}`,
+              fileName: file.name,
+              platform: selectedPlatform as Platform,
+              uploadedAt: new Date().toISOString(),
+              claimsCount: result.claims.length,
+              status: 'processed',
+              duplicatesSkipped: dupes,
+            }, ...prev])
+            // Refresh claims from API
+            return api.claims.list({ pageSize: '500' })
+          })
+          .then((data) => {
+            if (data?.claims) {
+              setClaims(data.claims.map((c: any) => ({
+                id: c.id,
+                claimNumber: c.claim_number,
+                classification: c.classification,
+                platform: c.platform,
+                providerName: c.provider_name,
+                billedAmount: c.billed_amount,
+                status: c.status === 'InReview' ? 'In Review' : c.status,
+                confidence: c.confidence || 0,
+                daysAged: c.days_aged,
+                state: c.state,
+                createdAt: c.created_at,
+                updatedAt: c.updated_at,
+              })))
+            }
+          })
+          .catch((err) => { console.error('[Upload] Error:', err) })
 
         // Auto-select the uploaded platform in the filter
         if (selectedPlatform && !selectedPlatforms.includes(selectedPlatform)) {
@@ -225,7 +282,9 @@ export default function FileIntakePage() {
               size="sm"
               variant="ghost"
               className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive"
-              onClick={clearClaims}
+              onClick={() => {
+                api.claims.clearAll().then(() => { setClaims([]); setUploads([]) }).catch(() => {})
+              }}
             >
               <Trash2 className="h-3.5 w-3.5" />
               Clear All
@@ -342,7 +401,7 @@ export default function FileIntakePage() {
                         variant="ghost"
                         size="sm"
                         className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                        onClick={() => removeUpload(upload.id)}
+                        onClick={() => setUploads((prev) => prev.filter((u) => u.id !== upload.id))}
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>

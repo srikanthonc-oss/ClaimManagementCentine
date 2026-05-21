@@ -111,8 +111,13 @@ export const useDataSourcesStore = create<DataSourcesState>()(
         dataSources: [...state.dataSources, dataSource],
       }))
 
-      // Sync with backend
-      api.dataSources.create(dataSource).catch(() => {})
+      // Sync with backend — only send fields the API expects
+      api.dataSources.create({
+        name: dataSource.name,
+        type: dataSource.type,
+        config: dataSource.config || {},
+        status: dataSource.status || 'active',
+      }).catch(() => {})
 
       return { success: true }
     },
@@ -170,8 +175,17 @@ export const useDataSourcesStore = create<DataSourcesState>()(
         ),
       }))
 
-      // Sync with backend
-      api.dataSources.update(id, updates).catch(() => {})
+      // Sync with backend — only send fields the API expects
+      const existing = get().dataSources.find(ds => ds.id === id)
+      if (existing) {
+        const updated = { ...existing, ...updates }
+        api.dataSources.update(id, {
+          name: updated.name,
+          type: updated.type,
+          config: updated.config || {},
+          status: updated.status || 'active',
+        }).catch(() => {})
+      }
 
       return { success: true }
     },

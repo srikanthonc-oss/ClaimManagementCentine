@@ -1,7 +1,6 @@
 'use client'
 
 import * as React from 'react'
-import { useClaimsStore } from '@/stores/claims-store'
 import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -35,17 +34,48 @@ function formatCompactCurrency(amount: number): string {
 }
 
 export default function DashboardPage() {
-  const claims = useClaimsStore((state) => state.claims)
+  const [claims, setClaims] = React.useState<Claim[]>([])
   const [viewingClaim, setViewingClaim] = React.useState<Claim | null>(null)
-  const [apiMetrics, setApiMetrics] = React.useState<any>(null)
+  const [isLoading, setIsLoading] = React.useState(true)
+  const [fetchError, setFetchError] = React.useState<string | null>(null)
 
-  // Fetch metrics from backend API on mount
+  // Helper to map backend claim to frontend format
+  const mapClaim = (c: any): Claim => ({
+    id: c.id,
+    claimNumber: c.claim_number,
+    classification: c.classification,
+    platform: c.platform,
+    providerName: c.provider_name,
+    billedAmount: c.billed_amount,
+    status: c.status === 'InReview' ? 'In Review' : c.status,
+    confidence: c.confidence || 0,
+    daysAged: c.days_aged,
+    state: c.state,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+  })
+
+  // Fetch claims from backend on mount
   React.useEffect(() => {
-    api.dashboard.metrics()
-      .then((data) => {
-        setApiMetrics(data)
-      })
-      .catch(() => {})
+    let cancelled = false
+
+    const doFetch = async () => {
+      try {
+        const data = await api.claims.list({ pageSize: '500' })
+        if (!cancelled && data?.claims) {
+          setClaims(data.claims.map(mapClaim))
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setFetchError(err.message || 'Failed to load claims')
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    }
+
+    doFetch()
+    return () => { cancelled = true }
   }, [])
 
   // Count examiner decisions (claims manually approved/denied — confidence set to 100 by approve action)
@@ -66,23 +96,8 @@ export default function DashboardPage() {
     return new Date(Math.max(...dates))
   }, [claims])
 
-  // Compute metrics from the shared claims store (fallback if API unavailable)
+  // Compute metrics from claims only (no API override)
   const metrics = React.useMemo(() => {
-    // Use API metrics if available
-    if (apiMetrics) {
-      return {
-        total: apiMetrics.total ?? 0,
-        pendedClaims: apiMetrics.pendedClaims ?? 0,
-        autoResolved: apiMetrics.autoResolved ?? 0,
-        autoResolvedPct: apiMetrics.autoResolvedPct ?? 0,
-        needsHITL: apiMetrics.needsHITL ?? 0,
-        denied: apiMetrics.denied ?? 0,
-        totalBilled: apiMetrics.totalBilled ?? 0,
-        avgConfidence: apiMetrics.avgConfidence ?? 0,
-      }
-    }
-
-    // Fallback: compute from local claims store
     const total = claims.length
     const approved = claims.filter((c) => c.status === 'Approved').length
     const denied = claims.filter((c) => c.status === 'Denied').length
@@ -107,7 +122,7 @@ export default function DashboardPage() {
       totalBilled,
       avgConfidence,
     }
-  }, [claims, apiMetrics])
+  }, [claims])
 
   // Pend mix by category
   const pendMixByCategory = React.useMemo(() => {
@@ -143,6 +158,41 @@ export default function DashboardPage() {
   }
 
   // Empty state
+  if (isLoading) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <p className="text-xs text-primary font-medium">PendResolve AI · Operations</p>
+          <h1 className="text-2xl font-bold mt-1">Pend Resolution Dashboard</h1>
+          <p className="text-xs text-muted-foreground">Real-time view across core claims platforms, AI agents, and HITL workbenches.</p>
+        </div>
+        <div className="rounded-lg border border-dashed p-12 text-center">
+          <Activity className="mx-auto h-8 w-8 text-muted-foreground animate-pulse" />
+          <h3 className="mt-3 text-sm font-semibold">Loading claims data...</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Fetching from database</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (fetchError) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <p className="text-xs text-primary font-medium">PendResolve AI · Operations</p>
+          <h1 className="text-2xl font-bold mt-1">Pend Resolution Dashboard</h1>
+          <p className="text-xs text-muted-foreground">Real-time view across core claims platforms, AI agents, and HITL workbenches.</p>
+        </div>
+        <div className="rounded-lg border border-dashed border-destructive/50 p-12 text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-destructive" />
+          <h3 className="mt-3 text-sm font-semibold">Failed to load data</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{fetchError}</p>
+          <p className="mt-2 text-xs text-muted-foreground">Check that the backend is running on port 4000 and you are signed in.</p>
+        </div>
+      </div>
+    )
+  }
+
   if (claims.length === 0) {
     return (
       <div className="space-y-5">

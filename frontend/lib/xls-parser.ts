@@ -44,7 +44,7 @@ const REQUIRED_COLUMNS = ['ClaimNumber', 'Classification', 'ProviderName', 'Bill
 /**
  * Optional columns that enhance the data but aren't required
  */
-const OPTIONAL_COLUMNS = ['Platform', 'Status', 'Confidence', 'HoldCode', 'SubmitType', 'CLAIM_TYPE', 'ProviderSpecialty', 'AllowedAmount', 'SubscriberId', 'ParFlag', 'Form', 'RecvDt']
+const OPTIONAL_COLUMNS = ['Platform', 'Status', 'Confidence', 'HoldCode', 'SubmitType', 'CLAIM_TYPE', 'ProviderSpecialty', 'AllowedAmount', 'SubscriberId', 'Subcriber Id', 'ParFlag', 'Form', 'RecvDt']
 
 /**
  * Parses an XLS/XLSX file and extracts claims data
@@ -361,7 +361,7 @@ function parseClaimRow(
   const claimTypeVal = columnIndices['CLAIM_TYPE'] !== undefined ? getCellValue(row, columnIndices['CLAIM_TYPE']) : null
   const provSpecVal = columnIndices['ProviderSpecialty'] !== undefined ? getCellValue(row, columnIndices['ProviderSpecialty']) : null
   const allowedAmtVal = columnIndices['AllowedAmount'] !== undefined ? getCellValue(row, columnIndices['AllowedAmount']) : null
-  const subscriberIdVal = columnIndices['SubscriberId'] !== undefined ? getCellValue(row, columnIndices['SubscriberId']) : null
+  const subscriberIdVal = columnIndices['SubscriberId'] !== undefined ? getCellValue(row, columnIndices['SubscriberId']) : (columnIndices['Subcriber Id'] !== undefined ? getCellValue(row, columnIndices['Subcriber Id']) : null)
   const parFlagVal = columnIndices['ParFlag'] !== undefined ? getCellValue(row, columnIndices['ParFlag']) : null
   const formVal = columnIndices['Form'] !== undefined ? getCellValue(row, columnIndices['Form']) : null
   const recvDtVal = columnIndices['RecvDt'] !== undefined ? getCellValue(row, columnIndices['RecvDt']) : null

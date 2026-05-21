@@ -1,11 +1,10 @@
 ﻿'use client'
 
 import * as React from 'react'
-import { useClaimsStore } from '@/stores/claims-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useDataSourcesStore } from '@/stores/data-sources-store'
 import { useAuthStore } from '@/stores/auth-store'
-import { useAgentResultsStore, generateAgentResult } from '@/stores/agent-results-store'
+import { generateAgentResult } from '@/stores/agent-results-store'
 import { cn, formatCurrency } from '@/lib/utils'
 import type { Claim, Platform, Classification } from '@/types'
 import {
@@ -100,15 +99,50 @@ function generateReasoningSteps(claim: Claim) {
 }
 
 export default function PendProcessingPage() {
-  const claims = useClaimsStore((state) => state.claims)
-  const updateClaim = useClaimsStore((state) => state.updateClaim)
+  const [claims, setClaims] = React.useState<Claim[]>([])
   const selectedPlatforms = useUIStore((state) => state.selectedPlatforms)
   const togglePlatform = useUIStore((state) => state.togglePlatform)
   const clearPlatformFilters = useUIStore((state) => state.clearPlatformFilters)
   const dataSources = useDataSourcesStore((state) => state.dataSources)
+  const fetchDataSources = useDataSourcesStore((state) => state.fetchDataSources)
   const currentUser = useAuthStore((state) => state.currentUser)
-  const setAgentResult = useAgentResultsStore((state) => state.setResult)
-  const getAgentResult = useAgentResultsStore((state) => state.getResult)
+
+  // Map backend claim to frontend format
+  const mapClaim = (c: any): Claim => ({
+    id: c.id,
+    claimNumber: c.claim_number,
+    classification: c.classification,
+    platform: c.platform,
+    providerName: c.provider_name,
+    billedAmount: c.billed_amount,
+    allowedAmount: c.allowed_amount,
+    status: c.status === 'InReview' ? 'In Review' : c.status,
+    confidence: c.confidence || 0,
+    daysAged: c.days_aged,
+    state: c.state,
+    holdCode: c.hold_code,
+    submitType: c.submit_type,
+    claimType: c.claim_type,
+    providerSpecialty: c.provider_specialty,
+    subscriberId: c.subscriber_id,
+    parFlag: c.par_flag,
+    form: c.form,
+    recvDt: c.recv_dt,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+  })
+
+  // Fetch claims and data sources from backend on mount
+  React.useEffect(() => {
+    fetchDataSources()
+    api.claims.list({ pageSize: '500' })
+      .then((data) => {
+        if (data?.claims) {
+          setClaims(data.claims.map(mapClaim))
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const canExecute = currentUser?.role === 'admin' || currentUser?.role === 'examiner'
 
@@ -132,19 +166,30 @@ export default function PendProcessingPage() {
   const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('asc')
   const [processedIds, setProcessedIds] = React.useState<Set<string>>(new Set())
 
+  // Initialize processedIds from claims that already have confidence > 0 (processed in backend)
+  React.useEffect(() => {
+    const alreadyProcessed = claims.filter((c) => c.confidence > 0).map((c) => c.id)
+    if (alreadyProcessed.length > 0) {
+      setProcessedIds((prev) => {
+        const next = new Set(prev)
+        alreadyProcessed.forEach((id) => next.add(id))
+        return next
+      })
+    }
+  }, [claims])
+
+  // Check if any claims have been processed
+  const hasProcessedClaims = processedIds.size > 0
+
   const allPlatforms: Platform[] = ['Facet', 'Amisys', 'Xcelys']
 
-  // Only show platforms that have an active data source AND user has access
+  // Enable platforms that have claims in the database
   const enabledPlatforms = React.useMemo(() => {
-    const activeSourceNames = dataSources
-      .filter((ds) => ds.status === 'active')
-      .map((ds) => ds.name)
-    const fromSources = allPlatforms.filter((p) => activeSourceNames.includes(p))
-    // Admin has access to all, others only their assigned platforms
-    if (currentUser?.role === 'admin') return fromSources
+    const platformsWithClaims = [...new Set(claims.map((c) => c.platform))] as Platform[]
+    if (currentUser?.role === 'admin') return platformsWithClaims
     const userPlatforms = currentUser?.platforms || []
-    return fromSources.filter((p) => userPlatforms.includes(p))
-  }, [dataSources, currentUser])
+    return platformsWithClaims.filter((p) => userPlatforms.includes(p))
+  }, [claims, currentUser])
 
   // Platform counts â€” only for user's allowed platforms
   const platformCounts = React.useMemo(() => {
@@ -159,6 +204,13 @@ export default function PendProcessingPage() {
     })
     return counts
   }, [claims, currentUser])
+
+  // Auto-select all platforms with claims on first load
+  React.useEffect(() => {
+    if (claims.length > 0 && selectedPlatforms.length === 0 && enabledPlatforms.length > 0) {
+      enabledPlatforms.forEach((p) => togglePlatform(p))
+    }
+  }, [enabledPlatforms.length])
 
   // Step 1: Filter by platform â€” show nothing when none selected, restrict to user's platforms
   const platformFilteredClaims = React.useMemo(() => {
@@ -299,7 +351,7 @@ export default function PendProcessingPage() {
     const approved = categoryFilteredClaims.filter((c) => c.status === 'Approved' && c.confidence === 100).length
     // Denied by examiner
     const denied = categoryFilteredClaims.filter((c) => c.status === 'Denied').length
-    // Manual processing required (processed but AI cannot handle — status is Pending)
+    // Manual processing required (processed but AI cannot handle - status is Pending)
     const pendBack = categoryFilteredClaims.filter((c) => c.status === 'Pending' && processedIds.has(c.id)).length
     return { total, executed, autoResolved, needsHITL, approved, denied, pendBack }
   }, [categoryFilteredClaims, processedIds])
@@ -317,7 +369,12 @@ export default function PendProcessingPage() {
     if (filteredClaims.length === 0 || isProcessing) return
     setIsProcessing(true)
 
-    const claimsToProcess = [...filteredClaims]
+    // Only process claims that haven't been processed yet (status=Pending, confidence=0)
+    const claimsToProcess = filteredClaims.filter((c) => c.status === 'Pending' && c.confidence === 0)
+    if (claimsToProcess.length === 0) {
+      setIsProcessing(false)
+      return
+    }
     let index = 0
     const interval = setInterval(() => {
       if (index >= claimsToProcess.length) {
@@ -331,15 +388,14 @@ export default function PendProcessingPage() {
       const agentResult = generateAgentResult(claim)
       const confidence = agentResult.confidenceBreakdown.overall
 
-      // Store agent result
-      setAgentResult(claim.claimNumber, agentResult)
-
-      // Update claim with derived confidence and outcome
+      // Update claim locally
       const outcome = confidence >= autoResolveThreshold ? 'Approved' : 'In Review'
-      updateClaim(claim.id, {
-        confidence,
-        status: outcome as Claim['status'],
-      })
+      setClaims((prev) => prev.map((c) =>
+        c.id === claim.id ? { ...c, confidence, status: outcome as Claim['status'] } : c
+      ))
+
+      // Store in backend DB
+      api.claims.process(claim.id, agentResult).catch(() => {})
 
       setProcessedIds((prev) => new Set([...prev, claim.id]))
       index++
@@ -435,7 +491,7 @@ export default function PendProcessingPage() {
           const isChecked = selectedPlatforms.includes(platform)
           const isEnabled = enabledPlatforms.includes(platform)
           const count = platformCounts[platform] || 0
-          const isDisabled = !isEnabled || count === 0
+          const isDisabled = count === 0
           return (
             <div key={platform} className="flex items-center space-x-2">
               <Checkbox
@@ -615,9 +671,11 @@ export default function PendProcessingPage() {
                   <span className="inline-flex items-center gap-1 justify-end">Billed {getSortIcon('billedAmount')}</span>
                 </th>
                 <th className="text-center px-3 py-2.5 font-medium text-muted-foreground">Outcome</th>
+                {hasProcessedClaims && (
                 <th className="text-center px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('confidence')}>
                   <span className="inline-flex items-center gap-1">Confidence {getSortIcon('confidence')}</span>
                 </th>
+                )}
                 <th className="text-center px-3 py-2.5 font-medium text-muted-foreground"></th>
               </tr>
             </thead>
@@ -668,6 +726,7 @@ export default function PendProcessingPage() {
                         <span className="text-muted-foreground">Pending</span>
                       )}
                     </td>
+                    {hasProcessedClaims && (
                     <td className="px-3 py-2.5 text-center">
                       {processed ? (
                         <span className={cn(
@@ -678,9 +737,10 @@ export default function PendProcessingPage() {
                           {claim.confidence}%
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">â€”</span>
+                        <span className="text-muted-foreground">-</span>
                       )}
                     </td>
+                    )}
                     <td className="px-3 py-2.5 text-center">
                       <Button
                         variant="ghost"
@@ -726,44 +786,29 @@ export default function PendProcessingPage() {
           canExecute={canExecute}
           onClose={() => setViewingClaim(null)}
           onApprove={(notes) => {
-            updateClaim(viewingClaim.id, { status: 'Approved', confidence: 100 })
-            // Sync with backend
+            // Update locally
+            setClaims((prev) => prev.map((c) =>
+              c.id === viewingClaim.id ? { ...c, status: 'Approved' as Claim['status'], confidence: 100 } : c
+            ))
+            // Store in backend DB
             api.claims.decide(viewingClaim.id, 'approve', null, notes).catch(() => {})
-            // Save examiner decision
-            const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
-            if (existing) {
-              setAgentResult(viewingClaim.claimNumber, {
-                ...existing,
-                examinerDecision: { action: 'approve', notes, decidedBy: currentUser?.name || '', decidedAt: new Date().toISOString() }
-              })
-            }
             setViewingClaim(null)
           }}
           onDeny={(notes) => {
             if (notes.startsWith('[MANUAL-REVIEW:')) {
-              updateClaim(viewingClaim.id, { status: 'Pending' })
+              setClaims((prev) => prev.map((c) =>
+                c.id === viewingClaim.id ? { ...c, status: 'Pending' as Claim['status'] } : c
+              ))
               const reason = notes.match(/\[MANUAL-REVIEW: (.*?)\]/)?.[1] || ''
               const cleanNotes = notes.replace(/\[MANUAL-REVIEW:.*?\]\s*/, '')
               api.claims.decide(viewingClaim.id, 'manual-review', reason, cleanNotes).catch(() => {})
-              const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
-              if (existing) {
-                setAgentResult(viewingClaim.claimNumber, {
-                  ...existing,
-                  examinerDecision: { action: 'manual-review', reason, notes: cleanNotes, decidedBy: currentUser?.name || '', decidedAt: new Date().toISOString() }
-                })
-              }
             } else {
-              updateClaim(viewingClaim.id, { status: 'Denied' })
+              setClaims((prev) => prev.map((c) =>
+                c.id === viewingClaim.id ? { ...c, status: 'Denied' as Claim['status'] } : c
+              ))
               const reason = notes.match(/\[(.*?)\]/)?.[1] || ''
               const cleanNotes = notes.replace(/\[.*?\]\s*/, '')
               api.claims.decide(viewingClaim.id, 'deny', reason, cleanNotes).catch(() => {})
-              const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
-              if (existing) {
-                setAgentResult(viewingClaim.claimNumber, {
-                  ...existing,
-                  examinerDecision: { action: 'deny', reason, notes: cleanNotes, decidedBy: currentUser?.name || '', decidedAt: new Date().toISOString() }
-                })
-              }
             }
             setViewingClaim(null)
           }}

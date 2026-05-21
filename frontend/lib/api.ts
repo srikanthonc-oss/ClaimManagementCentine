@@ -1,7 +1,7 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
 
 /**
- * Get the auth token from localStorage
+ * Get the auth token from localStorage (optional)
  */
 function getToken(): string | null {
   if (typeof window === 'undefined') return null
@@ -9,7 +9,7 @@ function getToken(): string | null {
 }
 
 /**
- * Make an authenticated API request
+ * Make an API request (auth token sent if available, but not required)
  */
 async function request(path: string, options: RequestInit = {}): Promise<any> {
   const token = getToken()
@@ -24,16 +24,12 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
     headers,
   })
 
-  if (res.status === 401) {
-    // Token expired — clear and redirect
-    localStorage.removeItem('auth-token')
-    if (typeof window !== 'undefined') window.location.href = '/sign-in'
-    throw new Error('Unauthorized')
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || data.error || `Request failed (${res.status})`)
   }
 
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || 'Request failed')
-  return data
+  return await res.json()
 }
 
 // Auth
@@ -51,6 +47,7 @@ export const api = {
       return request(`/api/claims${query}`)
     },
     get: (id: string) => request(`/api/claims/${id}`),
+    uploads: () => request('/api/claims/uploads'),
     upload: (claims: any[], fileName: string, platform: string) =>
       request('/api/claims/upload', { method: 'POST', body: JSON.stringify({ claims, fileName, platform }) }),
     process: (id: string, agentResult: any) =>

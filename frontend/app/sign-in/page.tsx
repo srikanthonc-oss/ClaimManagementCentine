@@ -3,12 +3,12 @@
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/stores/auth-store'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { AlertCircle } from 'lucide-react'
-import Link from 'next/link'
 
 export default function SignInPage() {
   const router = useRouter()
@@ -27,7 +27,7 @@ export default function SignInPage() {
     }
   }, [currentUser, router])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
@@ -37,16 +37,28 @@ export default function SignInPage() {
     }
 
     setIsLoading(true)
-    // Simulate network delay
-    setTimeout(() => {
-      const result = signIn(email.trim(), password)
-      if (result.success) {
-        router.push('/dashboard')
-      } else {
-        setError(result.error || 'Sign in failed')
+
+    try {
+      const data = await api.auth.signIn(email.trim(), password)
+      // Store JWT token
+      if (data.token) {
+        localStorage.setItem('auth-token', data.token)
       }
+      // Store user in Zustand
+      signIn({
+        id: data.user.id,
+        email: data.user.email,
+        name: data.user.name,
+        role: data.user.role,
+        platforms: data.user.platforms || [],
+        isActive: true,
+      })
+      router.push('/dashboard')
+    } catch (err: any) {
+      setError(err.message || 'Sign in failed. Check credentials or backend connection.')
+    } finally {
       setIsLoading(false)
-    }, 500)
+    }
   }
 
   return (
@@ -108,9 +120,6 @@ export default function SignInPage() {
                 {isLoading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
-
-            <div className="mt-4 text-center">
-            </div>
           </CardContent>
         </Card>
 

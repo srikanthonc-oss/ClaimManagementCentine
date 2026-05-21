@@ -9,39 +9,38 @@ interface AuthGuardProps {
   allowedRoles?: UserRole[]
 }
 
-// Pages that don't require authentication
 const publicPaths = ['/sign-in', '/sign-up']
 
 export function AuthGuard({ children, allowedRoles }: AuthGuardProps) {
-  const router = useRouter()
   const pathname = usePathname()
+  const router = useRouter()
   const currentUser = useAuthStore((state) => state.currentUser)
-  const [checked, setChecked] = React.useState(false)
+  const [hydrated, setHydrated] = React.useState(false)
 
-  const isPublicPage = publicPaths.some((p) => pathname.startsWith(p))
-
+  // Wait for Zustand to hydrate from localStorage
   React.useEffect(() => {
-    if (isPublicPage) {
-      setChecked(true)
-      return
-    }
-    if (!currentUser) {
-      router.push('/sign-in')
-    } else {
-      setChecked(true)
-    }
-  }, [currentUser, router, isPublicPage])
+    setHydrated(true)
+  }, [])
 
-  // Public pages render immediately without auth
-  if (isPublicPage) {
+  // Public pages — always render
+  if (publicPaths.includes(pathname)) {
     return <>{children}</>
   }
 
-  if (!checked || !currentUser) {
+  // Wait for hydration before making auth decisions
+  if (!hydrated) {
     return null
   }
 
-  // Check role access if specified
+  // Not signed in — redirect to sign-in
+  if (!currentUser) {
+    if (typeof window !== 'undefined') {
+      router.replace('/sign-in')
+    }
+    return null
+  }
+
+  // Role check
   if (allowedRoles && !allowedRoles.includes(currentUser.role)) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">

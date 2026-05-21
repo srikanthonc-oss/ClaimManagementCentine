@@ -5,6 +5,7 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useAgentResultsStore } from '@/stores/agent-results-store'
 import { useAuthStore } from '@/stores/auth-store'
+import { COBAdjudicationView } from '@/components/cob-adjudication-view'
 import { api } from '@/lib/api'
 import type { Claim } from '@/types'
 import { X, FileText, Bot, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
@@ -76,7 +77,7 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-6 overflow-auto">
       <div className="fixed inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative z-50 w-full max-w-2xl rounded-lg border bg-background shadow-2xl mb-10">
+      <div className="relative z-50 w-full max-w-4xl rounded-lg border bg-background shadow-2xl mb-10">
         <button onClick={onClose} className="absolute right-4 top-4 text-muted-foreground hover:text-foreground z-10">
           <X className="h-4 w-4" />
         </button>
@@ -140,166 +141,10 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
           </div>
         </div>
 
-        {/* Agent Results Section */}
-        {processed && agentResult && (
-          <div className="px-6 pb-4 space-y-3">
-            {/* Data Sources Used */}
-            <div className="rounded-lg border p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Bot className="h-4 w-4 text-primary" />
-                <span className="text-xs font-bold">Data Sources Used</span>
-                <span className="text-[10px] text-muted-foreground">· platforms & applications touched during processing</span>
-              </div>
-              <div className="space-y-2.5">
-                <div className="flex items-start gap-3 border-l-2 border-blue-500 pl-3">
-                  <span className="inline-flex rounded bg-blue-500/20 px-2 py-0.5 text-[9px] font-medium text-blue-400 mt-0.5 shrink-0">core claims</span>
-                  <div><p className="text-xs font-semibold">{claim.platform} Core Claims Platform</p><p className="text-[10px] text-muted-foreground">Pend source · final adjudication writeback</p></div>
-                </div>
-                <div className="flex items-start gap-3 border-l-2 border-green-500 pl-3">
-                  <span className="inline-flex rounded bg-green-500/20 px-2 py-0.5 text-[9px] font-medium text-green-400 mt-0.5 shrink-0">eligibility</span>
-                  <div><p className="text-xs font-semibold">PendResolve · Data Hub (Member360)</p><p className="text-[10px] text-muted-foreground">Eligibility & benefits lookup for {agentResult.cobHistory[0]?.primaryInsurance || 'Medicare'}</p></div>
-                </div>
-                <div className="flex items-start gap-3 border-l-2 border-purple-500 pl-3">
-                  <span className="inline-flex rounded bg-purple-500/20 px-2 py-0.5 text-[9px] font-medium text-purple-400 mt-0.5 shrink-0">rules</span>
-                  <div><p className="text-xs font-semibold">State Business-Rules Registry ({claim.state} · Medicare)</p><p className="text-[10px] text-muted-foreground">Timely-filing & state validation rules</p></div>
-                </div>
-                <div className="flex items-start gap-3 border-l-2 border-amber-500 pl-3">
-                  <span className="inline-flex rounded bg-amber-500/20 px-2 py-0.5 text-[9px] font-medium text-amber-400 mt-0.5 shrink-0">ai gateway</span>
-                  <div><p className="text-xs font-semibold">AWS AI Gateway · gpt-resolve-v3</p><p className="text-[10px] text-muted-foreground">AI reasoning, classification, recommendation</p></div>
-                </div>
-                <div className="flex items-start gap-3 border-l-2 border-pink-500 pl-3">
-                  <span className="inline-flex rounded bg-pink-500/20 px-2 py-0.5 text-[9px] font-medium text-pink-400 mt-0.5 shrink-0">bpm</span>
-                  <div><p className="text-xs font-semibold">BPM / Workbench</p><p className="text-[10px] text-muted-foreground">Case routing, HITL queueing, audit trail</p></div>
-                </div>
-                <div className="flex items-start gap-3 border-l-2 border-cyan-500 pl-3">
-                  <span className="inline-flex rounded bg-cyan-500/20 px-2 py-0.5 text-[9px] font-medium text-cyan-400 mt-0.5 shrink-0">auth um</span>
-                  <div><p className="text-xs font-semibold">Utilization Management (UM) System</p><p className="text-[10px] text-muted-foreground">Authorization lookup & CPT/unit overlap</p></div>
-                </div>
-                <div className="flex items-start gap-3 border-l-2 border-purple-500 pl-3">
-                  <span className="inline-flex rounded bg-purple-500/20 px-2 py-0.5 text-[9px] font-medium text-purple-400 mt-0.5 shrink-0">rules</span>
-                  <div><p className="text-xs font-semibold">InterQual / MCG Criteria Library</p><p className="text-[10px] text-muted-foreground">Medical-policy criteria evaluation</p></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Claim & EOB Images */}
-            <div className="rounded-lg border p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                  <span className="text-xs font-bold">Claim & EOB Images</span>
-                </div>
-                <span className="text-[10px] text-muted-foreground">Private · short-lived signed URLs</span>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs font-medium mb-1">Claim Form</p>
-                  <div className="rounded border border-dashed p-3 text-center">
-                    <p className="text-[10px] text-muted-foreground italic">{claim.submitType === 'PAPER' ? 'Paper claim form scanned and stored' : 'EDI submission — no paper form'}</p>
-                  </div>
-                </div>
-                {agentResult.eobExtraction && (
-                  <div>
-                    <p className="text-xs font-medium mb-1">Primary EOB</p>
-                    <div className="rounded border p-3">
-                      <div className="grid grid-cols-4 gap-3 text-xs">
-                        <div><p className="text-[10px] text-muted-foreground">Insurance</p><p className="font-medium">{agentResult.eobExtraction.insuranceName}</p></div>
-                        <div><p className="text-[10px] text-muted-foreground">Paid</p><p className="font-medium">${agentResult.eobExtraction.paidAmt.toFixed(2)}</p></div>
-                        <div><p className="text-[10px] text-muted-foreground">Adj Code</p><p className="font-mono">{agentResult.eobExtraction.adjGrpCode}</p></div>
-                        <div><p className="text-[10px] text-muted-foreground">PR Amount</p><p className="font-medium">${agentResult.eobExtraction.prAmount.toFixed(2)}</p></div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Hold Code + Confidence */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] font-semibold mb-1">Hold Code</p>
-                <div className="flex items-center gap-2">
-                  <span className="rounded border px-1.5 py-0.5 text-[10px] font-mono">{agentResult.holdCodeInfo.reason}</span>
-                  <span className="text-[10px] text-muted-foreground">{agentResult.holdCodeInfo.description}</span>
-                </div>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] font-semibold mb-1">Confidence Breakdown</p>
-                <div className="flex items-center gap-3 text-[10px]">
-                  <span>Elig: <strong className={agentResult.confidenceBreakdown.eligibility >= 90 ? 'text-green-400' : 'text-yellow-400'}>{agentResult.confidenceBreakdown.eligibility}%</strong></span>
-                  <span>Price: <strong className={agentResult.confidenceBreakdown.pricing >= 90 ? 'text-green-400' : 'text-yellow-400'}>{agentResult.confidenceBreakdown.pricing}%</strong></span>
-                  <span>Comp: <strong className={agentResult.confidenceBreakdown.compliance >= 90 ? 'text-green-400' : 'text-yellow-400'}>{agentResult.confidenceBreakdown.compliance}%</strong></span>
-                </div>
-              </div>
-            </div>
-
-            {/* Claim Detail Lines */}
-            <div className="rounded-lg border p-3">
-              <p className="text-[10px] font-semibold mb-2">Claim Detail Lines</p>
-              <div className="overflow-auto">
-                <table className="w-full text-[10px]">
-                  <thead><tr className="border-b">
-                    <th className="text-left py-1 pr-2">Line</th>
-                    <th className="text-left py-1 pr-2">CPT</th>
-                    <th className="text-left py-1 pr-2">Mod</th>
-                    <th className="text-right py-1 pr-2">Units</th>
-                    <th className="text-right py-1 pr-2">Billed</th>
-                    <th className="text-right py-1 pr-2">Allowed</th>
-                    <th className="text-right py-1 pr-2">Copay</th>
-                    <th className="text-right py-1">OC Paid</th>
-                  </tr></thead>
-                  <tbody>
-                    {agentResult.claimDetails.map((line) => (
-                      <tr key={line.lineNo} className="border-b border-border/30">
-                        <td className="py-1 pr-2">{line.lineNo}</td>
-                        <td className="py-1 pr-2 font-mono">{line.cpt}</td>
-                        <td className="py-1 pr-2">{line.modifier}</td>
-                        <td className="py-1 pr-2 text-right">{line.units}</td>
-                        <td className="py-1 pr-2 text-right">${line.billedAmt.toFixed(2)}</td>
-                        <td className="py-1 pr-2 text-right">${line.allowedAmt.toFixed(2)}</td>
-                        <td className="py-1 pr-2 text-right">${line.copay.toFixed(2)}</td>
-                        <td className="py-1 text-right">${line.ocPaid.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* COB History */}
-            {agentResult.cobHistory.length > 0 && (
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] font-semibold mb-2">COB History</p>
-                {agentResult.cobHistory.map((entry) => (
-                  <div key={entry.sno} className="flex items-center gap-3 text-xs">
-                    <span className="text-[10px] text-muted-foreground">#{entry.sno}</span>
-                    <span className="font-medium">{entry.primaryInsurance}</span>
-                    <span className="text-muted-foreground">{entry.effectiveDate} — {entry.termDate}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Denial Check */}
-            <div className="rounded-lg border p-3">
-              <p className="text-[10px] font-semibold mb-1">Denial Check</p>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="rounded border px-1.5 py-0.5 text-[10px] font-mono">{agentResult.denialDetail.reasonCode}</span>
-                <span className="text-muted-foreground">Line {agentResult.denialDetail.lineNo} · History: {agentResult.denialDetail.history ? 'Yes' : 'No'}</span>
-              </div>
-            </div>
-
-            {/* AI Resolution Summary */}
-            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Bot className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-bold">AI Resolution</span>
-                <span className={cn('ml-auto inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold',
-                  claim.confidence >= 95 ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'
-                )}>Confidence: {claim.confidence}%</span>
-              </div>
-              <p className="text-xs text-muted-foreground">{agentResult.reasoningSummary}</p>
-            </div>
+        {/* COB Adjudication AI Analysis — shown after pend execution */}
+        {processed && (
+          <div className="px-6 pb-4">
+            <COBAdjudicationView claim={claim} />
           </div>
         )}
 
@@ -348,7 +193,7 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
                     decisionAction === 'pend-back' ? 'border-amber-500 bg-amber-500/10 text-amber-400' : 'text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  ↩ Manual Review (Cannot Process With AI)
+                  ↩ Manual Processing Required
                 </button>
               </div>
             </div>
@@ -455,28 +300,34 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
             </div>
 
             {/* Examiner Decision Details */}
-            {agentResult?.examinerDecision && (
+            {displayDecision && (
               <div className="mt-3 rounded-lg border p-3">
                 <p className="text-[10px] font-semibold mb-2">Examiner Decision Record</p>
                 <div className="space-y-1.5 text-xs">
                   <div className="flex items-baseline gap-2">
                     <span className="text-[10px] text-muted-foreground">Decided by:</span>
-                    <span className="font-medium">{agentResult.examinerDecision.decidedBy}</span>
+                    <span className="font-medium">{displayDecision.decided_by_name || displayDecision.decidedBy || 'Examiner'}</span>
                   </div>
                   <div className="flex items-baseline gap-2">
                     <span className="text-[10px] text-muted-foreground">Date:</span>
-                    <span className="font-medium">{new Date(agentResult.examinerDecision.decidedAt).toLocaleString()}</span>
+                    <span className="font-medium">{displayDecision.decided_at || displayDecision.decidedAt ? new Date(displayDecision.decided_at || displayDecision.decidedAt).toLocaleString() : '—'}</span>
                   </div>
-                  {agentResult.examinerDecision.reason && (
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[10px] text-muted-foreground">Action:</span>
+                    <span className="rounded border px-1.5 py-0.5 text-[10px] font-mono font-semibold">{displayDecision.action || '—'}</span>
+                  </div>
+                  {(displayDecision.reason || displayDecision.reason) && (
                     <div className="flex items-baseline gap-2">
                       <span className="text-[10px] text-muted-foreground">Reason:</span>
-                      <span className="rounded border px-1.5 py-0.5 text-[10px] font-mono">{agentResult.examinerDecision.reason}</span>
+                      <span className="rounded border px-1.5 py-0.5 text-[10px] font-mono">{displayDecision.reason}</span>
                     </div>
                   )}
-                  <div className="flex items-start gap-2">
-                    <span className="text-[10px] text-muted-foreground shrink-0">Notes:</span>
-                    <span className="text-muted-foreground">{agentResult.examinerDecision.notes}</span>
-                  </div>
+                  {(displayDecision.notes) && (
+                    <div className="flex items-start gap-2">
+                      <span className="text-[10px] text-muted-foreground shrink-0">Notes:</span>
+                      <span className="text-muted-foreground">{displayDecision.notes}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { LayoutDashboard, Database, FileUp, ClipboardList, GitBranch, Bot, Layers, HelpCircle, PanelLeftClose, PanelLeft, Users, LogOut, Sliders } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { useAuthStore } from '@/stores/auth-store'
@@ -48,14 +48,20 @@ export function Navigation() {
   const { collapsed, setCollapsed } = React.useContext(SidebarContext)
   const currentUser = useAuthStore((state) => state.currentUser)
   const signOut = useAuthStore((state) => state.signOut)
+  const router = useRouter()
+
+  const handleSignOut = () => {
+    signOut()
+    router.replace('/sign-in')
+  }
 
   const navLinks: NavLink[] = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     ...(currentUser?.role === 'admin' ? [{ href: '/data-sources', label: 'Data Sources', icon: Database }] : []),
     ...(currentUser?.role === 'admin' ? [{ href: '/file-intake', label: 'Claims File Intake', icon: FileUp }] : []),
     { href: '/pend-processing', label: 'Claims Processing', icon: ClipboardList },
-    { href: '/cob', label: 'COB', icon: GitBranch },
-    { href: '/ai-functions', label: 'AI Functions', icon: Bot },
+    { href: '/cob', label: 'COB Pipeline', icon: GitBranch },
+    { href: '/ai-functions', label: 'Agent Registry', icon: Bot },
     { href: '/data-ontology', label: 'Data Ontology', icon: Layers },
     { href: '/help', label: 'Help & Training', icon: HelpCircle },
     ...(currentUser?.role === 'admin' ? [{ href: '/routing-thresholds', label: 'Routing Thresholds', icon: Sliders }] : []),
@@ -128,7 +134,7 @@ export function Navigation() {
         {!collapsed && <ThemeToggle />}
         {/* Sign out */}
         <button
-          onClick={signOut}
+          onClick={handleSignOut}
           title="Sign out"
           className={cn(
             'flex items-center w-full rounded-md px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors',

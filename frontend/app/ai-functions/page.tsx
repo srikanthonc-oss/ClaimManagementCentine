@@ -1,157 +1,211 @@
 'use client'
 
 import * as React from 'react'
-import { useClaimsStore } from '@/stores/claims-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { cn, formatCurrency } from '@/lib/utils'
-import type { Claim } from '@/types'
+import { cn } from '@/lib/utils'
 import {
   Bot,
   Activity,
   CheckCircle2,
-  XCircle,
-  Clock,
-  Zap,
-  Shield,
-  Search,
-  DollarSign,
-  Users,
+  ArrowRight,
   ToggleLeft,
   ToggleRight,
   FlaskConical,
   Loader2,
+  Cpu,
+  Brain,
+  Shield,
+  Calculator,
+  FileCheck,
+  Clock,
+  Workflow,
+  Layers,
+  CircleDot,
 } from 'lucide-react'
 
-/** AI Function definition */
-interface AIFunction {
+/** Agent definition */
+interface Agent {
   id: string
+  number: number
   name: string
   description: string
   model: string
-  threshold: number
-  icon: React.ReactNode
-  category: 'eligibility' | 'detection' | 'pricing' | 'compliance' | 'coordination'
+  modelType: 'rules' | 'llm' | 'hybrid'
+  stage: string
+  latency: string
+  successRate: string
+  lastExecution: string
 }
 
-const aiFunctions: AIFunction[] = [
+const agents: Agent[] = [
   {
-    id: 'cob-eligibility',
-    name: 'COB Eligibility Check',
-    description: 'Verifies other insurance via EDI 270/271 transactions and applies NAIC/birthday/MSP rules',
-    model: 'gpt-4o',
-    threshold: 0.92,
-    icon: <Shield className="h-4 w-4" />,
-    category: 'eligibility',
+    id: 'intake-adapter',
+    number: 1,
+    name: 'Intake Adapter Agent',
+    description: 'Schema normalization, data extraction from XLS/EDI/PAPER sources.',
+    model: 'Rules Engine',
+    modelType: 'rules',
+    stage: '1-2',
+    latency: '80ms',
+    successRate: '99.2%',
+    lastExecution: '2 min ago',
   },
   {
-    id: 'duplicate-detection',
-    name: 'Duplicate Detection',
-    description: 'Identifies potential duplicate claims using fuzzy matching on claim number, provider, amount, and date',
-    model: 'custom-ensemble-v2',
-    threshold: 0.88,
-    icon: <Search className="h-4 w-4" />,
-    category: 'detection',
+    id: 'hold-code-validation',
+    number: 2,
+    name: 'Hold Code Validation Agent',
+    description: 'Validates hold/denial codes against CMS registry and plan rules.',
+    model: 'Rules Engine',
+    modelType: 'rules',
+    stage: '3',
+    latency: '150ms',
+    successRate: '98.8%',
+    lastExecution: '3 min ago',
   },
   {
-    id: 'pricing-validation',
-    name: 'Pricing Validation',
-    description: 'Validates billed amounts against fee schedules and flags outliers beyond allowed variance',
-    model: 'pricing-engine-v3',
-    threshold: 0.85,
-    icon: <DollarSign className="h-4 w-4" />,
-    category: 'pricing',
+    id: 'eligibility',
+    number: 3,
+    name: 'Eligibility Agent',
+    description: 'Member eligibility verification, COB history lookup, insurance matching.',
+    model: 'Claude 3.5 Sonnet (Bedrock)',
+    modelType: 'llm',
+    stage: '4',
+    latency: '1200ms',
+    successRate: '97.1%',
+    lastExecution: '1 min ago',
   },
   {
-    id: 'fraud-scoring',
-    name: 'Fraud Scoring',
-    description: 'Ensemble model scoring claims for fraud indicators including sanctions, upcoding, and unbundling',
-    model: 'fraud-ensemble-v1',
-    threshold: 0.75,
-    icon: <Shield className="h-4 w-4" />,
-    category: 'compliance',
+    id: 'timely-filing',
+    number: 4,
+    name: 'Timely Filing Agent',
+    description: 'State-specific filing rules validation, date calculations per CMS 42 CFR 424.44.',
+    model: 'Rules Engine',
+    modelType: 'rules',
+    stage: '5',
+    latency: '100ms',
+    successRate: '99.5%',
+    lastExecution: '4 min ago',
   },
   {
-    id: 'auth-verification',
-    name: 'Authorization Verification',
-    description: 'Checks prior authorization status and validates auth-to-claim matching for auth-type pends',
-    model: 'gpt-4o',
-    threshold: 0.90,
-    icon: <CheckCircle2 className="h-4 w-4" />,
-    category: 'eligibility',
+    id: 'coordination-rule',
+    number: 5,
+    name: 'Coordination Rule Agent',
+    description: 'Primary/secondary payer determination, NAIC birthday rule, MSP guidelines.',
+    model: 'Claude 3.5 Sonnet (Bedrock)',
+    modelType: 'llm',
+    stage: '6',
+    latency: '890ms',
+    successRate: '96.3%',
+    lastExecution: '2 min ago',
   },
   {
-    id: 'coordination-rules',
-    name: 'COB Coordination Rules',
-    description: 'Determines primary/secondary payer using birthday rule, NAIC guidelines, and plan hierarchy',
-    model: 'rules-engine-v2',
-    threshold: 0.92,
-    icon: <Users className="h-4 w-4" />,
-    category: 'coordination',
+    id: 'cob-calculation',
+    number: 6,
+    name: 'COB Calculation Agent',
+    description: 'Financial calculations, allowed amounts, PR amounts, net payable.',
+    model: 'Rules Engine + Claude 3.5 Sonnet',
+    modelType: 'hybrid',
+    stage: '7',
+    latency: '450ms',
+    successRate: '98.5%',
+    lastExecution: '1 min ago',
   },
   {
-    id: 'high-dollar-review',
-    name: 'High Dollar Triage',
-    description: 'Triages high-dollar claims for senior reviewer routing based on amount, provider history, and complexity',
-    model: 'triage-model-v1',
-    threshold: 0.80,
-    icon: <DollarSign className="h-4 w-4" />,
-    category: 'pricing',
+    id: 'posting',
+    number: 7,
+    name: 'Posting Agent',
+    description: 'System update recommendations, adjustment codes, hold release logic.',
+    model: 'Rules Engine',
+    modelType: 'rules',
+    stage: '8',
+    latency: '200ms',
+    successRate: '99.0%',
+    lastExecution: '5 min ago',
   },
   {
-    id: 'auto-adjudication',
-    name: 'Auto-Adjudication Engine',
-    description: 'Final decision engine that combines all agent outputs to auto-approve, deny, or route to HITL',
-    model: 'adjudication-v4',
-    threshold: 0.92,
-    icon: <Zap className="h-4 w-4" />,
-    category: 'compliance',
+    id: 'post-validation',
+    number: 8,
+    name: 'Post Validation Agent',
+    description: 'Final compliance checks, duplicate detection, audit trail generation.',
+    model: 'Claude 3.5 Sonnet (Bedrock)',
+    modelType: 'llm',
+    stage: '9',
+    latency: '340ms',
+    successRate: '98.2%',
+    lastExecution: '3 min ago',
+  },
+  {
+    id: 'resolution-orchestrator',
+    number: 9,
+    name: 'Resolution Orchestrator',
+    description: 'Orchestrates all agents, determines final recommendation (auto-resolve vs HITL).',
+    model: 'Claude 3.5 Sonnet (Bedrock)',
+    modelType: 'llm',
+    stage: 'All',
+    latency: '180ms',
+    successRate: '99.7%',
+    lastExecution: '1 min ago',
   },
 ]
 
+function getBorderColor(modelType: Agent['modelType']) {
+  switch (modelType) {
+    case 'rules':
+      return 'border-l-blue-500'
+    case 'llm':
+      return 'border-l-purple-500'
+    case 'hybrid':
+      return 'border-l-[#7c3aed]' // gradient approximation
+    default:
+      return 'border-l-border'
+  }
+}
+
+function getModelBadgeStyle(modelType: Agent['modelType']) {
+  switch (modelType) {
+    case 'rules':
+      return 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+    case 'llm':
+      return 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+    case 'hybrid':
+      return 'bg-violet-500/10 text-violet-400 border-violet-500/30'
+    default:
+      return 'bg-muted text-muted-foreground'
+  }
+}
+
 export default function AIFunctionsPage() {
-  const claims = useClaimsStore((state) => state.claims)
   const currentUser = useAuthStore((state) => state.currentUser)
   const isAdmin = currentUser?.role === 'admin'
 
-  // Persist enabled functions to localStorage
-  const [enabledFunctions, setEnabledFunctions] = React.useState<Set<string>>(() => {
+  // Persist enabled agents to localStorage
+  const [enabledAgents, setEnabledAgents] = React.useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('ai-functions-enabled')
+      const stored = localStorage.getItem('ai-agent-registry')
       if (stored) {
-        try { return new Set(JSON.parse(stored) as string[]) } catch { /* ignore */ }
+        try {
+          return new Set(JSON.parse(stored) as string[])
+        } catch {
+          /* ignore */
+        }
       }
     }
-    return new Set(aiFunctions.map((f) => f.id))
+    return new Set(agents.map((a) => a.id))
   })
 
   React.useEffect(() => {
-    localStorage.setItem('ai-functions-enabled', JSON.stringify([...enabledFunctions]))
-  }, [enabledFunctions])
+    localStorage.setItem('ai-agent-registry', JSON.stringify([...enabledAgents]))
+  }, [enabledAgents])
 
-  // Persist editable thresholds to localStorage
-  const [thresholds, setThresholds] = React.useState<{ autoResolve: number; hitlLow: number }>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('ai-routing-thresholds')
-      if (stored) {
-        try { return JSON.parse(stored) } catch { /* ignore */ }
-      }
-    }
-    return { autoResolve: 92, hitlLow: 60 }
-  })
+  // Test agent state
+  const [testingAgent, setTestingAgent] = React.useState<string | null>(null)
+  const [testResults, setTestResults] = React.useState<Record<string, 'success' | 'idle'>>({})
 
-  React.useEffect(() => {
-    localStorage.setItem('ai-routing-thresholds', JSON.stringify(thresholds))
-  }, [thresholds])
-
-  // Test function state
-  const [testingFn, setTestingFn] = React.useState<string | null>(null)
-  const [testResult, setTestResult] = React.useState<{ fnId: string; confidence: number; decision: string; latency: number } | null>(null)
-
-  const toggleFunction = (id: string) => {
-    setEnabledFunctions((prev) => {
+  const toggleAgent = (id: string) => {
+    if (!isAdmin) return
+    setEnabledAgents((prev) => {
       const next = new Set(prev)
       if (next.has(id)) {
         next.delete(id)
@@ -162,271 +216,239 @@ export default function AIFunctionsPage() {
     })
   }
 
-  // Simulated execution stats based on claims count
-  const getStats = React.useCallback((fn: AIFunction) => {
-    const base = claims.length
-    const seed = fn.id.length * 7
-    const invocations = base > 0 ? Math.floor(base * (0.3 + (seed % 10) / 10)) : 0
-    const successRate = 88 + (seed % 12)
-    const avgLatency = 120 + (seed % 400)
-    return { invocations, successRate: Math.min(successRate, 99.5), avgLatency }
-  }, [claims.length])
+  const handleTestAgent = (agentId: string) => {
+    setTestingAgent(agentId)
+    setTestResults((prev) => ({ ...prev, [agentId]: 'idle' }))
 
-  // Summary metrics
-  const summaryMetrics = React.useMemo(() => {
-    const active = enabledFunctions.size
-    const total = aiFunctions.length
-    const totalInvocations = aiFunctions.reduce((sum, fn) => sum + getStats(fn).invocations, 0)
-    const avgSuccess = aiFunctions.length > 0
-      ? aiFunctions.reduce((sum, fn) => sum + getStats(fn).successRate, 0) / aiFunctions.length
-      : 0
-    return { active, total, totalInvocations, avgSuccess: Math.round(avgSuccess * 10) / 10 }
-  }, [enabledFunctions, getStats])
-
-  // Test a function on a sample claim
-  const handleTestFunction = (fnId: string) => {
-    setTestingFn(fnId)
-    setTestResult(null)
-
+    const delay = 1000 + Math.random() * 1000
     setTimeout(() => {
-      const confidence = Math.floor(Math.random() * 30) + 70
-      const decision = confidence >= thresholds.autoResolve ? 'Auto-Resolve' : confidence >= thresholds.hitlLow ? 'HITL Review' : 'Force HITL'
-      const latency = Math.floor(Math.random() * 500) + 100
-      setTestResult({ fnId, confidence, decision, latency })
-      setTestingFn(null)
-    }, 1200)
+      setTestResults((prev) => ({ ...prev, [agentId]: 'success' }))
+      setTestingAgent(null)
+    }, delay)
   }
+
+  const activeCount = enabledAgents.size
 
   return (
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">AI Functions</h1>
-        <p className="text-xs text-muted-foreground">Configure and monitor AI agents powering the pend resolution pipeline</p>
+        <h1 className="text-2xl font-bold">AI Agent Registry</h1>
+        <p className="text-xs text-muted-foreground">
+          Manage and monitor AI agents powering the COB Pend Resolution pipeline
+        </p>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
         <Card>
           <CardContent className="p-4">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Active Functions</p>
-            <p className="mt-1 text-3xl font-bold">{summaryMetrics.active}/{summaryMetrics.total}</p>
+            <div className="flex items-center gap-2 mb-1">
+              <Bot className="h-4 w-4 text-muted-foreground" />
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Total Agents
+              </p>
+            </div>
+            <p className="text-3xl font-bold">9</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Total Invocations</p>
-            <p className="mt-1 text-3xl font-bold">{summaryMetrics.totalInvocations.toLocaleString()}</p>
+            <div className="flex items-center gap-2 mb-1">
+              <Activity className="h-4 w-4 text-green-500" />
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Active Agents
+              </p>
+            </div>
+            <p className="text-3xl font-bold text-green-500">{activeCount}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Avg Success Rate</p>
-            <p className="mt-1 text-3xl font-bold">{summaryMetrics.avgSuccess}%</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Claims Processed</p>
-            <p className="mt-1 text-3xl font-bold">{claims.length}</p>
+            <div className="flex items-center gap-2 mb-1">
+              <Workflow className="h-4 w-4 text-primary" />
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Pipeline Status
+              </p>
+            </div>
+            <p className={cn('text-3xl font-bold', activeCount === 9 ? 'text-green-500' : 'text-yellow-500')}>
+              {activeCount === 9 ? 'Active' : 'Paused'}
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Function Registry Table */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <div className="flex items-center gap-2">
-              <Bot className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-bold">Function Registry</h2>
-            </div>
-          </div>
-          <div className="overflow-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/50">
-                <tr className="border-b">
-                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Function</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Model</th>
-                  <th className="text-center px-4 py-2.5 font-medium text-muted-foreground">Threshold</th>
-                  <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Invocations (24h)</th>
-                  <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Success Rate</th>
-                  <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Avg Latency</th>
-                  <th className="text-center px-4 py-2.5 font-medium text-muted-foreground">Status</th>
-                  <th className="text-center px-4 py-2.5 font-medium text-muted-foreground">Test</th>
-                </tr>
-              </thead>
-              <tbody>
-                {aiFunctions.map((fn) => {
-                  const stats = getStats(fn)
-                  const isEnabled = enabledFunctions.has(fn.id)
-                  return (
-                    <tr key={fn.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="rounded bg-primary/10 p-1.5 text-primary">
-                            {fn.icon}
-                          </div>
-                          <div>
-                            <p className="font-medium">{fn.name}</p>
-                            <p className="text-[10px] text-muted-foreground max-w-[250px] truncate">{fn.description}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex rounded border px-1.5 py-0.5 text-[10px] font-mono">
-                          {fn.model}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="font-medium">{(fn.threshold * 100).toFixed(0)}%</span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium">
-                        {stats.invocations.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={cn(
-                          'font-medium',
-                          stats.successRate >= 95 ? 'text-green-400' :
-                          stats.successRate >= 90 ? 'text-yellow-400' : 'text-red-400'
-                        )}>
-                          {stats.successRate.toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-muted-foreground">
-                        {stats.avgLatency}ms
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => isAdmin && toggleFunction(fn.id)}
-                          className={cn('inline-flex items-center gap-1', !isAdmin && 'opacity-50 cursor-not-allowed')}
-                          aria-label={`Toggle ${fn.name}`}
-                          disabled={!isAdmin}
-                        >
-                          {isEnabled ? (
-                            <ToggleRight className="h-5 w-5 text-green-500" />
-                          ) : (
-                            <ToggleLeft className="h-5 w-5 text-muted-foreground" />
-                          )}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 text-[10px]"
-                          onClick={() => handleTestFunction(fn.id)}
-                          disabled={testingFn === fn.id || !isEnabled}
-                        >
-                          {testingFn === fn.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <FlaskConical className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Test Result */}
-      {testResult && (
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <FlaskConical className="h-4 w-4 text-primary" />
-              <h3 className="text-xs font-semibold">Test Result — {aiFunctions.find((f) => f.id === testResult.fnId)?.name}</h3>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] text-muted-foreground">Confidence Score</p>
-                <p className={cn('text-lg font-bold mt-0.5',
-                  testResult.confidence >= thresholds.autoResolve ? 'text-green-400' :
-                  testResult.confidence >= thresholds.hitlLow ? 'text-yellow-400' : 'text-red-400'
-                )}>
-                  {testResult.confidence}%
-                </p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] text-muted-foreground">Decision</p>
-                <span className={cn('mt-0.5 inline-flex rounded px-2 py-0.5 text-xs font-bold',
-                  testResult.decision === 'Auto-Resolve' ? 'bg-green-500/20 text-green-400' :
-                  testResult.decision === 'HITL Review' ? 'bg-amber-500/20 text-amber-400' :
-                  'bg-red-500/20 text-red-400'
-                )}>
-                  {testResult.decision}
-                </span>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-[10px] text-muted-foreground">Latency</p>
-                <p className="text-lg font-bold mt-0.5">{testResult.latency}ms</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Editable Threshold Configuration */}
+      {/* Agent Pipeline Visualization */}
       <Card>
         <CardContent className="p-4">
-          <h3 className="text-xs font-semibold mb-3">Routing Thresholds (Global)</h3>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="rounded-lg border p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="h-2 w-2 rounded-full bg-green-500" />
-                <span className="text-xs font-medium">Auto-Resolve</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">≥</span>
-                <Input
-                  type="number"
-                  min={60}
-                  max={100}
-                  value={thresholds.autoResolve}
-                  onChange={(e) => setThresholds((prev) => ({ ...prev, autoResolve: Math.min(100, Math.max(prev.hitlLow + 1, parseInt(e.target.value) || 0)) }))}
-                  className="h-8 w-16 text-xs text-center"
-                  disabled={!isAdmin}
-                />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-2">Confidence threshold for auto-approval</p>
-            </div>
-            <div className="rounded-lg border p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="h-2 w-2 rounded-full bg-amber-500" />
-                <span className="text-xs font-medium">HITL Review</span>
-              </div>
-              <p className="text-lg font-bold">{thresholds.hitlLow}–{thresholds.autoResolve - 1}%</p>
-              <p className="text-[10px] text-muted-foreground mt-2">Routed to human reviewer</p>
-            </div>
-            <div className="rounded-lg border p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="h-2 w-2 rounded-full bg-red-500" />
-                <span className="text-xs font-medium">Force HITL</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">&lt;</span>
-                <Input
-                  type="number"
-                  min={0}
-                  max={90}
-                  value={thresholds.hitlLow}
-                  onChange={(e) => setThresholds((prev) => ({ ...prev, hitlLow: Math.min(prev.autoResolve - 1, Math.max(0, parseInt(e.target.value) || 0)) }))}
-                  className="h-8 w-16 text-xs text-center"
-                  disabled={!isAdmin}
-                />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-2">Mandatory human decision</p>
-            </div>
+          <div className="flex items-center gap-2 mb-4">
+            <Layers className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-bold">Agent Pipeline</h2>
+          </div>
+          <div className="flex items-center justify-start gap-1 overflow-x-auto pb-2">
+            {agents.map((agent, idx) => {
+              const isEnabled = enabledAgents.has(agent.id)
+              return (
+                <React.Fragment key={agent.id}>
+                  <div className="flex flex-col items-center gap-1 min-w-[56px]">
+                    <div
+                      className={cn(
+                        'flex items-center justify-center h-9 w-9 rounded-full border-2 text-xs font-bold transition-colors',
+                        isEnabled
+                          ? 'border-green-500 bg-green-500/20 text-green-400'
+                          : 'border-muted-foreground/40 bg-muted/50 text-muted-foreground'
+                      )}
+                    >
+                      {agent.number}
+                    </div>
+                    <span className="text-[9px] text-muted-foreground text-center leading-tight max-w-[60px] truncate">
+                      {agent.name.replace(' Agent', '')}
+                    </span>
+                  </div>
+                  {idx < agents.length - 1 && (
+                    <ArrowRight
+                      className={cn(
+                        'h-3.5 w-3.5 flex-shrink-0 mt-[-14px]',
+                        isEnabled && enabledAgents.has(agents[idx + 1].id)
+                          ? 'text-green-500'
+                          : 'text-muted-foreground/40'
+                      )}
+                    />
+                  )}
+                </React.Fragment>
+              )
+            })}
           </div>
         </CardContent>
       </Card>
+
+      {/* Agent Registry Cards */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Bot className="h-4 w-4 text-primary" />
+          <h2 className="text-sm font-bold">Agent Registry</h2>
+          <span className="text-[10px] text-muted-foreground ml-1">
+            {activeCount} of 9 active
+          </span>
+        </div>
+        <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+          {agents.map((agent) => {
+            const isEnabled = enabledAgents.has(agent.id)
+            const isTesting = testingAgent === agent.id
+            const testResult = testResults[agent.id]
+
+            return (
+              <Card
+                key={agent.id}
+                className={cn(
+                  'border-l-4 transition-opacity',
+                  getBorderColor(agent.modelType),
+                  !isEnabled && 'opacity-60'
+                )}
+              >
+                <CardContent className="p-4">
+                  {/* Agent Header */}
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={cn(
+                          'flex items-center justify-center h-7 w-7 rounded-full text-[10px] font-bold',
+                          isEnabled
+                            ? 'bg-green-500/20 text-green-400 border border-green-500/40'
+                            : 'bg-muted text-muted-foreground border border-border'
+                        )}
+                      >
+                        {agent.number}
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold leading-tight">{agent.name}</p>
+                        <p className="text-[10px] text-muted-foreground">Stage {agent.stage}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => toggleAgent(agent.id)}
+                      className={cn(
+                        'inline-flex items-center',
+                        !isAdmin && 'opacity-50 cursor-not-allowed'
+                      )}
+                      aria-label={`Toggle ${agent.name}`}
+                      disabled={!isAdmin}
+                    >
+                      {isEnabled ? (
+                        <ToggleRight className="h-5 w-5 text-green-500" />
+                      ) : (
+                        <ToggleLeft className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Description */}
+                  <p className="text-[10px] text-muted-foreground mb-3 leading-relaxed">
+                    {agent.description}
+                  </p>
+
+                  {/* Model Badge */}
+                  <div className="mb-3">
+                    <span
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium',
+                        getModelBadgeStyle(agent.modelType)
+                      )}
+                    >
+                      {agent.modelType === 'rules' && <Cpu className="h-2.5 w-2.5" />}
+                      {agent.modelType === 'llm' && <Brain className="h-2.5 w-2.5" />}
+                      {agent.modelType === 'hybrid' && <CircleDot className="h-2.5 w-2.5" />}
+                      {agent.model}
+                    </span>
+                  </div>
+
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div className="rounded border p-1.5">
+                      <p className="text-[9px] text-muted-foreground">Latency</p>
+                      <p className="text-[11px] font-semibold">{agent.latency}</p>
+                    </div>
+                    <div className="rounded border p-1.5">
+                      <p className="text-[9px] text-muted-foreground">Success</p>
+                      <p className="text-[11px] font-semibold text-green-400">{agent.successRate}</p>
+                    </div>
+                    <div className="rounded border p-1.5">
+                      <p className="text-[9px] text-muted-foreground">Last Run</p>
+                      <p className="text-[11px] font-semibold">{agent.lastExecution}</p>
+                    </div>
+                  </div>
+
+                  {/* Test Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full h-7 text-[10px]"
+                    onClick={() => handleTestAgent(agent.id)}
+                    disabled={isTesting || !isEnabled}
+                  >
+                    {isTesting ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        Testing...
+                      </>
+                    ) : testResult === 'success' ? (
+                      <>
+                        <CheckCircle2 className="h-3 w-3 text-green-500 mr-1" />
+                        Success
+                      </>
+                    ) : (
+                      <>
+                        <FlaskConical className="h-3 w-3 mr-1" />
+                        Test Agent
+                      </>
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
