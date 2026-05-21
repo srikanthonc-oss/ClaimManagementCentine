@@ -154,3 +154,34 @@
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }
+
+/* Better table/grid visibility */
+@layer base {
+  :root {
+    --border: 214.3 31.8% 75%;
+  }
+}
+
+@layer components {
+  /* Light mode: stronger borders and header */
+  :root table thead {
+    @apply bg-slate-100;
+  }
+  
+  :root table tbody tr:nth-child(even) {
+    @apply bg-slate-50/50;
+  }
+  
+  /* Dark mode: visible header and row separation */
+  .dark table thead {
+    background-color: hsl(217.2 32.6% 20%);
+  }
+  
+  .dark table tbody tr {
+    border-bottom: 1px solid hsl(217.2 32.6% 28%);
+  }
+  
+  .dark table tbody tr:nth-child(even) {
+    background-color: hsl(217.2 32.6% 14%);
+  }
+}
