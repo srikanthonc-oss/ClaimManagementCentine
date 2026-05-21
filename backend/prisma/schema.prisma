@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  examiner
+  viewer
+}
+
+enum ClaimStatus {
+  Pending
+  Approved
+  Denied
+  InReview
+}
+
+enum Platform {
+  Facet
+  Amisys
+  Xcelys
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      UserRole @default(viewer)
+  platforms Platform[]
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  uploads           UploadHistory[]
+  examinerDecisions ExaminerDecision[]
+  auditLogs         AuditLog[]
+}
+
+model Claim {
+  id               String      @id @default(uuid())
+  claimNumber      String      @unique
+  classification   String
+  platform         Platform
+  providerName     String
+  billedAmount     Float
+  allowedAmount    Float?
+  status           ClaimStatus @default(Pending)
+  confidence       Int         @default(0)
+  daysAged         Int
+  state            String
+  holdCode         String?
+  submitType       String?
+  claimType        String?
+  providerSpecialty String?
+  subscriberId     String?
+  parFlag          String?
+  form             String?
+  recvDt           String?
+  rawData          Json?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  uploadId         String?
+  upload           UploadHistory? @relation(fields: [uploadId], references: [id])
+  agentResult      AgentResult?
+  examinerDecision ExaminerDecision?
+}
+
+model AgentResult {
+  id          String   @id @default(uuid())
+  claimId     String   @unique
+  claim       Claim    @relation(fields: [claimId], references: [id])
+  resultData  Json     // Full agent output in JSONB
+  confidence  Json     // { eligibility, pricing, compliance, overall }
+  recommendation String
+  reasoningSummary String
+  processedAt DateTime @default(now())
+}
+
+model ExaminerDecision {
+  id        String   @id @default(uuid())
+  claimId   String   @unique
+  claim     Claim    @relation(fields: [claimId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String   // approve, deny, manual-review
+  reason    String?
+  notes     String
+  decidedAt DateTime @default(now())
+}
+
+model UploadHistory {
+  id              String   @id @default(uuid())
+  fileName        String
+  platform        Platform
+  claimsCount     Int
+  duplicatesSkipped Int    @default(0)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  uploadedAt      DateTime @default(now())
+
+  claims          Claim[]
+}
+
+model DataSource {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  type      String
+  config    Json
+  status    String   @default("active")
+  lastSync  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RoutingThreshold {
+  id           String @id @default("global")
+  autoResolve  Int    @default(92)
+  hitlLow      Int    @default(60)
+  updatedAt    DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  timestamp DateTime @default(now())
+}
