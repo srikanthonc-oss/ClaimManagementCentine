@@ -5,8 +5,9 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useAgentResultsStore } from '@/stores/agent-results-store'
 import { useAuthStore } from '@/stores/auth-store'
+import { api } from '@/lib/api'
 import type { Claim } from '@/types'
-import { X, FileText, Bot, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { X, FileText, Bot, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
 
 interface ClaimDetailViewProps {
   claim: Claim
@@ -26,6 +27,20 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
   const [decisionAction, setDecisionAction] = React.useState<'approve' | 'deny' | 'pend-back' | ''>('')
   const [denialReason, setDenialReason] = React.useState('')
   const [pendBackReason, setPendBackReason] = React.useState('')
+  const [freshData, setFreshData] = React.useState<any>(null)
+  const [loading, setLoading] = React.useState(true)
+
+  // Fetch fresh claim data from API on mount
+  React.useEffect(() => {
+    api.claims.get(claim.id)
+      .then((data) => setFreshData(data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [claim.id])
+
+  // Use fresh API data for agent result and examiner decision if available
+  const displayAgentResult = freshData?.agentResult?.result_data || agentResult
+  const displayDecision = freshData?.examinerDecision || agentResult?.examinerDecision
 
   const timelyFilingDays = claim.state === 'TX' ? 95 : claim.state === 'FL' ? 365 : claim.state === 'KY' ? 180 : 365
   const isWithinWindow = claim.daysAged <= timelyFilingDays

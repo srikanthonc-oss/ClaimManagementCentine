@@ -51,8 +51,14 @@ export default function DataSourcesPage() {
   const updateDataSource = useDataSourcesStore((state) => state.updateDataSource)
   const deleteDataSource = useDataSourcesStore((state) => state.deleteDataSource)
   const getDataSourceById = useDataSourcesStore((state) => state.getDataSourceById)
+  const fetchDataSources = useDataSourcesStore((state) => state.fetchDataSources)
   const currentUser = useAuthStore((state) => state.currentUser)
   const isAdmin = currentUser?.role === 'admin'
+
+  // Fetch data sources from API on mount
+  React.useEffect(() => {
+    fetchDataSources()
+  }, [fetchDataSources])
 
   // Dialog state
   const [isFormDialogOpen, setIsFormDialogOpen] = React.useState(false)

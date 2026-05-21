@@ -1,35 +1,30 @@
 import { Router } from 'express'
-import { PrismaClient } from '@prisma/client'
+import { pool } from '../db/pool'
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth'
 
 const router = Router()
-const prisma = new PrismaClient()
 
-// GET /api/thresholds
 router.get('/', authenticate, async (req, res) => {
   try {
-    let threshold = await prisma.routingThreshold.findUnique({ where: { id: 'global' } })
-    if (!threshold) {
-      threshold = await prisma.routingThreshold.create({
-        data: { id: 'global', autoResolve: 92, hitlLow: 60 },
-      })
+    let result = await pool.query("SELECT * FROM routing_thresholds WHERE id = 'global'")
+    if (result.rows.length === 0) {
+      await pool.query("INSERT INTO routing_thresholds (id, auto_resolve, hitl_low) VALUES ('global', 92, 60)")
+      result = await pool.query("SELECT * FROM routing_thresholds WHERE id = 'global'")
     }
-    res.json(threshold)
+    res.json(result.rows[0])
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch thresholds' })
   }
 })
 
-// PUT /api/thresholds
 router.put('/', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
     const { autoResolve, hitlLow } = req.body
-    const threshold = await prisma.routingThreshold.upsert({
-      where: { id: 'global' },
-      create: { id: 'global', autoResolve, hitlLow },
-      update: { autoResolve, hitlLow },
-    })
-    res.json(threshold)
+    const result = await pool.query(
+      "UPDATE routing_thresholds SET auto_resolve=$1, hitl_low=$2, updated_at=NOW() WHERE id='global' RETURNING *",
+      [autoResolve, hitlLow]
+    )
+    res.json(result.rows[0])
   } catch (error) {
     res.status(500).json({ error: 'Failed to update thresholds' })
   }

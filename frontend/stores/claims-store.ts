@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import type { Claim, Platform, Classification, ClaimStatus } from '@/types'
 
 /**
@@ -55,10 +54,8 @@ interface ClaimsState {
  * - CRUD operations (set, add, clear, update)
  * - Filtering by platform, classification, and status
  * - Computed metrics for dashboard and analytics
- * - Persistence via localStorage so data survives page refreshes
  */
 export const useClaimsStore = create<ClaimsState>()(
-  persist(
     (set, get) => ({
   // Initial state
   claims: [],
@@ -278,10 +275,5 @@ export const useClaimsStore = create<ClaimsState>()(
     const total = claims.reduce((sum, claim) => sum + claim.daysAged, 0)
     return total / claims.length
   },
-    }),
-    {
-      name: 'claims-storage',
-      partialize: (state) => ({ claims: state.claims, uploads: state.uploads }),
-    }
-  )
+    })
 )

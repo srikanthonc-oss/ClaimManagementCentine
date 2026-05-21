@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import type { Platform, Classification } from '@/types'
 
 /**
@@ -43,11 +42,8 @@ interface UIState {
  * - Expanded classification groups in Pend Processing page
  * - Selected platform filters in Pend Processing page
  * - Search queries for claims tables
- * 
- * Uses Zustand persist middleware to save selected platforms to localStorage
  */
 export const useUIStore = create<UIState>()(
-  persist(
     (set, get) => ({
       // File Intake State
       activeTab: null,
@@ -208,12 +204,5 @@ export const useUIStore = create<UIState>()(
           searchQuery: '',
         })
       },
-    }),
-    {
-      name: 'ui-store',
-      partialize: (state) => ({
-        selectedPlatforms: state.selectedPlatforms,
-      }),
-    }
-  )
+    })
 )

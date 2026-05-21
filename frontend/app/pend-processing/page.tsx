@@ -29,6 +29,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { ClaimDetailView } from '@/components/claim-detail-view'
+import { api } from '@/lib/api'
 
 // Agent reasoning steps that vary by classification
 function generateReasoningSteps(claim: Claim) {
@@ -129,22 +130,7 @@ export default function PendProcessingPage() {
   const [searchQuery, setSearchQuery] = React.useState('')
   const [sortColumn, setSortColumn] = React.useState<string>('')
   const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('asc')
-  const [processedIds, setProcessedIds] = React.useState<Set<string>>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('processed-claim-ids')
-      if (stored) {
-        try {
-          return new Set(JSON.parse(stored) as string[])
-        } catch { /* ignore */ }
-      }
-    }
-    return new Set()
-  })
-
-  // Persist processedIds to localStorage whenever it changes
-  React.useEffect(() => {
-    localStorage.setItem('processed-claim-ids', JSON.stringify([...processedIds]))
-  }, [processedIds])
+  const [processedIds, setProcessedIds] = React.useState<Set<string>>(new Set())
 
   const allPlatforms: Platform[] = ['Facet', 'Amisys', 'Xcelys']
 
@@ -741,6 +727,8 @@ export default function PendProcessingPage() {
           onClose={() => setViewingClaim(null)}
           onApprove={(notes) => {
             updateClaim(viewingClaim.id, { status: 'Approved', confidence: 100 })
+            // Sync with backend
+            api.claims.decide(viewingClaim.id, 'approve', null, notes).catch(() => {})
             // Save examiner decision
             const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
             if (existing) {
@@ -752,11 +740,11 @@ export default function PendProcessingPage() {
             setViewingClaim(null)
           }}
           onDeny={(notes) => {
-            // Check if it's a manual review action
             if (notes.startsWith('[MANUAL-REVIEW:')) {
               updateClaim(viewingClaim.id, { status: 'Pending' })
               const reason = notes.match(/\[MANUAL-REVIEW: (.*?)\]/)?.[1] || ''
               const cleanNotes = notes.replace(/\[MANUAL-REVIEW:.*?\]\s*/, '')
+              api.claims.decide(viewingClaim.id, 'manual-review', reason, cleanNotes).catch(() => {})
               const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
               if (existing) {
                 setAgentResult(viewingClaim.claimNumber, {
@@ -768,6 +756,7 @@ export default function PendProcessingPage() {
               updateClaim(viewingClaim.id, { status: 'Denied' })
               const reason = notes.match(/\[(.*?)\]/)?.[1] || ''
               const cleanNotes = notes.replace(/\[.*?\]\s*/, '')
+              api.claims.decide(viewingClaim.id, 'deny', reason, cleanNotes).catch(() => {})
               const existing = useAgentResultsStore.getState().results[viewingClaim.claimNumber]
               if (existing) {
                 setAgentResult(viewingClaim.claimNumber, {

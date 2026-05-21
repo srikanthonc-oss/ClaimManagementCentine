@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import type { Platform } from '@/types'
+import { api } from '@/lib/api'
 import {
   Select,
   SelectContent,
@@ -55,6 +56,18 @@ export default function UserManagementPage() {
   const addUser = useAuthStore((state) => state.addUser)
   const updateUser = useAuthStore((state) => state.updateUser)
   const deleteUser = useAuthStore((state) => state.deleteUser)
+  const setUsers = useAuthStore((state) => state.setUsers)
+
+  // Fetch users from API on mount
+  React.useEffect(() => {
+    api.users.list()
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setUsers(data)
+        }
+      })
+      .catch(() => {})
+  }, [setUsers])
 
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [editingUser, setEditingUser] = React.useState<AppUser | null>(null)
@@ -135,6 +148,8 @@ export default function UserManagementPage() {
         updates.password = formPassword
       }
       updateUser(editingUser.id, updates)
+      // Sync with backend
+      api.users.update(editingUser.id, updates).catch(() => {})
     } else {
       // Add new user
       const result = addUser({
@@ -149,6 +164,15 @@ export default function UserManagementPage() {
         setFormError(result.error || 'Failed to add user')
         return
       }
+      // Sync with backend
+      api.users.create({
+        email: formEmail.trim().toLowerCase(),
+        name: formName.trim(),
+        password: formPassword,
+        role: formRole,
+        platforms: formPlatforms,
+        isActive: true,
+      }).catch(() => {})
     }
 
     setIsDialogOpen(false)
@@ -156,11 +180,15 @@ export default function UserManagementPage() {
 
   const handleToggleActive = (user: AppUser) => {
     updateUser(user.id, { isActive: !user.isActive })
+    // Sync with backend
+    api.users.update(user.id, { isActive: !user.isActive }).catch(() => {})
   }
 
   const handleDelete = (user: AppUser) => {
     if (user.id === currentUser.id) return // Can't delete yourself
     deleteUser(user.id)
+    // Sync with backend
+    api.users.delete(user.id).catch(() => {})
   }
 
   const getRoleIcon = (role: UserRole) => {

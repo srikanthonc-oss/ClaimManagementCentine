@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import type { Claim } from '@/types'
 
 /** Hold code info extracted by AuthAgent */
@@ -261,7 +260,6 @@ export function generateAgentResult(claim: Claim): AgentResult {
 }
 
 export const useAgentResultsStore = create<AgentResultsState>()(
-  persist(
     (set, get) => ({
       results: {},
 
@@ -278,10 +276,5 @@ export const useAgentResultsStore = create<AgentResultsState>()(
       clearResults: () => {
         set({ results: {} })
       },
-    }),
-    {
-      name: 'agent-results-storage',
-      partialize: (state) => ({ results: state.results }),
-    }
-  )
+    })
 )

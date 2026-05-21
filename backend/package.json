@@ -1,25 +1,27 @@
 {
   "name": "agentic-claim-backend",
   "version": "1.0.0",
-  "description": "Backend API for Agentic AI Claim Management",
+  "description": "Backend REST API for Agentic AI Claim Management",
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio",
-    "seed": "ts-node prisma/seed.ts"
+    "db:init": "ts-node src/db/init.ts",
+    "db:seed": "ts-node src/db/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.0.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.500.0",
+    "@aws-sdk/client-dynamodb": "^3.500.0",
+    "@aws-sdk/client-s3": "^3.500.0",
+    "@aws-sdk/lib-dynamodb": "^3.500.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "pg": "^8.11.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -29,7 +31,7 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/multer": "^1.4.12",
     "@types/node": "^20.11.0",
-    "prisma": "^6.0.0",
+    "@types/pg": "^8.10.9",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"

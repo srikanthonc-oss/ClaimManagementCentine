@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { useClaimsStore } from '@/stores/claims-store'
+import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import type { Claim, Classification } from '@/types'
@@ -36,6 +37,16 @@ function formatCompactCurrency(amount: number): string {
 export default function DashboardPage() {
   const claims = useClaimsStore((state) => state.claims)
   const [viewingClaim, setViewingClaim] = React.useState<Claim | null>(null)
+  const [apiMetrics, setApiMetrics] = React.useState<any>(null)
+
+  // Fetch metrics from backend API on mount
+  React.useEffect(() => {
+    api.dashboard.metrics()
+      .then((data) => {
+        setApiMetrics(data)
+      })
+      .catch(() => {})
+  }, [])
 
   // Count examiner decisions (claims manually approved/denied — confidence set to 100 by approve action)
   const examinerDecisions = React.useMemo(() => {
@@ -55,8 +66,23 @@ export default function DashboardPage() {
     return new Date(Math.max(...dates))
   }, [claims])
 
-  // Compute metrics from the shared claims store
+  // Compute metrics from the shared claims store (fallback if API unavailable)
   const metrics = React.useMemo(() => {
+    // Use API metrics if available
+    if (apiMetrics) {
+      return {
+        total: apiMetrics.total ?? 0,
+        pendedClaims: apiMetrics.pendedClaims ?? 0,
+        autoResolved: apiMetrics.autoResolved ?? 0,
+        autoResolvedPct: apiMetrics.autoResolvedPct ?? 0,
+        needsHITL: apiMetrics.needsHITL ?? 0,
+        denied: apiMetrics.denied ?? 0,
+        totalBilled: apiMetrics.totalBilled ?? 0,
+        avgConfidence: apiMetrics.avgConfidence ?? 0,
+      }
+    }
+
+    // Fallback: compute from local claims store
     const total = claims.length
     const approved = claims.filter((c) => c.status === 'Approved').length
     const denied = claims.filter((c) => c.status === 'Denied').length
@@ -81,7 +107,7 @@ export default function DashboardPage() {
       totalBilled,
       avgConfidence,
     }
-  }, [claims])
+  }, [claims, apiMetrics])
 
   // Pend mix by category
   const pendMixByCategory = React.useMemo(() => {

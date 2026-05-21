@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { useAuthStore } from '@/stores/auth-store'
+import { api } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -10,20 +11,27 @@ import { Shield, Save, CheckCircle2 } from 'lucide-react'
 export default function RoutingThresholdsPage() {
   const currentUser = useAuthStore((state) => state.currentUser)
 
-  const [thresholds, setThresholds] = React.useState<{ autoResolve: number; hitlLow: number }>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('ai-routing-thresholds')
-      if (stored) {
-        try { return JSON.parse(stored) } catch { /* ignore */ }
-      }
-    }
-    return { autoResolve: 92, hitlLow: 60 }
+  const [thresholds, setThresholds] = React.useState<{ autoResolve: number; hitlLow: number }>({
+    autoResolve: 92,
+    hitlLow: 60,
   })
 
   const [saved, setSaved] = React.useState(false)
 
+  // Fetch thresholds from API on mount
+  React.useEffect(() => {
+    api.thresholds.get()
+      .then((data) => {
+        if (data && typeof data.autoResolve === 'number' && typeof data.hitlLow === 'number') {
+          setThresholds({ autoResolve: data.autoResolve, hitlLow: data.hitlLow })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const handleSave = () => {
-    localStorage.setItem('ai-routing-thresholds', JSON.stringify(thresholds))
+    // Save to backend API
+    api.thresholds.update(thresholds.autoResolve, thresholds.hitlLow).catch(() => {})
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }

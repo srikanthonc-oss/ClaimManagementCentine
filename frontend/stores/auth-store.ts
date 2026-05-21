@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Platform } from '@/types'
+import { api } from '@/lib/api'
 
 export type UserRole = 'admin' | 'examiner' | 'viewer'
 
@@ -26,6 +27,7 @@ interface AuthState {
   signOut: () => void
 
   // Admin actions
+  setUsers: (users: AppUser[]) => void
   addUser: (user: Omit<AppUser, 'id' | 'createdAt'>) => { success: boolean; error?: string }
   updateUser: (id: string, updates: Partial<AppUser>) => void
   deleteUser: (id: string) => void
@@ -51,6 +53,13 @@ export const useAuthStore = create<AuthState>()(
       currentUser: null,
 
       signIn: (email: string, password: string) => {
+        // Try backend API first
+        api.auth.signIn(email, password)
+          .then((data) => {
+            localStorage.setItem('auth-token', data.token)
+          })
+          .catch(() => { /* fallback to local */ })
+
         const user = get().users.find(
           (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
         )
@@ -99,6 +108,10 @@ export const useAuthStore = create<AuthState>()(
 
       signOut: () => {
         set({ currentUser: null })
+      },
+
+      setUsers: (users: AppUser[]) => {
+        set({ users })
       },
 
       addUser: (userData) => {

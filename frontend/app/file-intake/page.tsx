@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import { useClaimsStore, type UploadRecord } from '@/stores/claims-store'
+import { api } from '@/lib/api'
 import { useUIStore } from '@/stores/ui-store'
 import { useDataSourcesStore } from '@/stores/data-sources-store'
 import { useAuthStore } from '@/stores/auth-store'
@@ -170,6 +171,9 @@ export default function FileIntakePage() {
 
         // Add claims to store
         addClaims(result.claims)
+
+        // Sync with backend API
+        api.claims.upload(result.claims, file.name, selectedPlatform as string).catch(() => { /* silent fallback */ })
 
         // Record the upload
         const uploadRecord: UploadRecord = {
