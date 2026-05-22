@@ -166,9 +166,15 @@ export default function PendProcessingPage() {
   const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('asc')
   const [processedIds, setProcessedIds] = React.useState<Set<string>>(new Set())
 
-  // Initialize processedIds from claims that already have confidence > 0 (processed in backend)
+  // Initialize processedIds from claims that have been through the pipeline
+  // (confidence > 0 OR status is Denied/Approved with confidence=100 OR status changed from Pending)
   React.useEffect(() => {
-    const alreadyProcessed = claims.filter((c) => c.confidence > 0).map((c) => c.id)
+    const alreadyProcessed = claims.filter((c) =>
+      c.confidence > 0 ||
+      c.status === 'Denied' ||
+      c.status === 'Approved' ||
+      c.status === 'In Review'
+    ).map((c) => c.id)
     if (alreadyProcessed.length > 0) {
       setProcessedIds((prev) => {
         const next = new Set(prev)
@@ -252,7 +258,8 @@ export default function PendProcessingPage() {
         result = result.filter((c) => processedIds.has(c.id) && c.status === 'In Review')
         break
       case 'approved':
-        result = result.filter((c) => c.status === 'Approved' && c.confidence === 100)
+        // Manual-resolved: Approved but confidence was below auto-resolve threshold (examiner approved)
+        result = result.filter((c) => c.status === 'Approved' && c.confidence < autoResolveThreshold)
         break
       case 'denied':
         result = result.filter((c) => c.status === 'Denied')
@@ -347,8 +354,8 @@ export default function PendProcessingPage() {
     const autoResolved = categoryFilteredClaims.filter((c) => processedIds.has(c.id) && c.status === 'Approved' && c.confidence >= autoResolveThreshold && c.confidence < 100).length
     // Needs HITL: processed but confidence < 95 and still in review
     const needsHITL = categoryFilteredClaims.filter((c) => processedIds.has(c.id) && c.status === 'In Review').length
-    // Manually approved by examiner (confidence set to 100)
-    const approved = categoryFilteredClaims.filter((c) => c.status === 'Approved' && c.confidence === 100).length
+    // Manually approved by examiner (approved but confidence below threshold)
+    const approved = categoryFilteredClaims.filter((c) => c.status === 'Approved' && c.confidence < autoResolveThreshold).length
     // Denied by examiner
     const denied = categoryFilteredClaims.filter((c) => c.status === 'Denied').length
     // Manual processing required (processed but AI cannot handle - status is Pending)
@@ -712,12 +719,12 @@ export default function PendProcessingPage() {
                             ? 'bg-red-500/20 text-red-400'
                             : claim.status === 'Pending'
                             ? 'bg-purple-500/20 text-purple-400'
-                            : claim.status === 'Approved' && claim.confidence === 100
+                            : claim.status === 'Approved' && claim.confidence < autoResolveThreshold
                             ? 'bg-blue-500/20 text-blue-400'
                             : 'bg-amber-500/20 text-amber-400'
                         )}>
-                          {claim.confidence >= autoResolveThreshold && claim.status === 'Approved' && claim.confidence < 100 ? 'Auto-Resolved'
-                            : claim.status === 'Approved' && claim.confidence === 100 ? 'Manual-Resolved'
+                          {claim.confidence >= autoResolveThreshold && claim.status === 'Approved' ? 'Auto-Resolved'
+                            : claim.status === 'Approved' && claim.confidence < autoResolveThreshold ? 'Manual-Resolved'
                             : claim.status === 'Denied' ? 'Denied'
                             : claim.status === 'Pending' ? 'Manual Processing'
                             : 'Pending Review'}

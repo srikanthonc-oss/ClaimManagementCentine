@@ -118,6 +118,96 @@ def init_db():
             details JSONB,
             timestamp TIMESTAMP DEFAULT NOW()
         );
+
+        -- Agent-extracted data tables (populated by agents during pend resolution)
+
+        CREATE TABLE IF NOT EXISTS claim_hold_codes (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            claim_id UUID REFERENCES claims(id) ON DELETE CASCADE,
+            line_no INT NOT NULL,
+            hold_code VARCHAR(50),
+            history VARCHAR(10),
+            reason VARCHAR(50),
+            description TEXT,
+            extracted_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS claim_detail_lines (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            claim_id UUID REFERENCES claims(id) ON DELETE CASCADE,
+            line_no INT NOT NULL,
+            cpt VARCHAR(20) NOT NULL,
+            modifier VARCHAR(10),
+            start_date VARCHAR(20),
+            end_date VARCHAR(20),
+            units INT DEFAULT 1,
+            billed_amt DECIMAL(12,2) DEFAULT 0,
+            allowed_amt DECIMAL(12,2) DEFAULT 0,
+            copay DECIMAL(12,2) DEFAULT 0,
+            coinsurance DECIMAL(12,2) DEFAULT 0,
+            oc_paid DECIMAL(12,2) DEFAULT 0,
+            extracted_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS claim_cob_history (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            claim_id UUID REFERENCES claims(id) ON DELETE CASCADE,
+            sno INT NOT NULL,
+            primary_insurance VARCHAR(100) NOT NULL,
+            effective_date VARCHAR(20),
+            term_date VARCHAR(20),
+            extracted_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS claim_eob_extraction (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            claim_id UUID REFERENCES claims(id) ON DELETE CASCADE,
+            sno INT DEFAULT 1,
+            cpt VARCHAR(20),
+            insurance_name VARCHAR(100),
+            paid_amt DECIMAL(12,2) DEFAULT 0,
+            adj_grp_code VARCHAR(50),
+            reason_code VARCHAR(50),
+            pr_amount DECIMAL(12,2) DEFAULT 0,
+            image_ref VARCHAR(255),
+            extracted_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS claim_denial_details (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            claim_id UUID REFERENCES claims(id) ON DELETE CASCADE,
+            line_no INT NOT NULL,
+            history VARCHAR(10),
+            reason_code VARCHAR(50) NOT NULL,
+            extracted_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS claim_header_detail (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            claim_id UUID REFERENCES claims(id) ON DELETE CASCADE,
+            member_id VARCHAR(50),
+            specialty VARCHAR(50),
+            place_of_service VARCHAR(10),
+            par_status VARCHAR(10),
+            received_date VARCHAR(50),
+            extracted_at TIMESTAMP DEFAULT NOW()
+        );
+
+        -- Agent stage outputs (individual stage results stored separately)
+        CREATE TABLE IF NOT EXISTS agent_stage_outputs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            claim_id UUID REFERENCES claims(id) ON DELETE CASCADE,
+            stage_number INT NOT NULL,
+            stage_name VARCHAR(100) NOT NULL,
+            agent_name VARCHAR(100) NOT NULL,
+            input_data JSONB,
+            output_data JSONB NOT NULL,
+            outcome VARCHAR(100),
+            confidence VARCHAR(20),
+            reasoning TEXT,
+            executed_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(claim_id, stage_number)
+        );
     """)
     conn.commit()
     cur.close()

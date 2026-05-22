@@ -275,25 +275,25 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
         {processed && claim.status !== 'In Review' && (
           <div className="px-6 pb-4">
             <div className={cn('rounded-lg p-3 flex items-center gap-2',
-              claim.status === 'Approved' && claim.confidence >= 95 && claim.confidence < 100 ? 'bg-green-500/10 border border-green-500/30' :
-              claim.status === 'Approved' && claim.confidence === 100 ? 'bg-blue-500/10 border border-blue-500/30' :
+              claim.status === 'Approved' && claim.confidence >= 92 ? 'bg-green-500/10 border border-green-500/30' :
+              claim.status === 'Approved' ? 'bg-blue-500/10 border border-blue-500/30' :
               claim.status === 'Denied' ? 'bg-red-500/10 border border-red-500/30' :
               'bg-purple-500/10 border border-purple-500/30'
             )}>
               <CheckCircle2 className={cn('h-4 w-4',
-                claim.status === 'Approved' && claim.confidence < 100 ? 'text-green-400' :
+                claim.status === 'Approved' && claim.confidence >= 92 ? 'text-green-400' :
                 claim.status === 'Approved' ? 'text-blue-400' :
                 claim.status === 'Denied' ? 'text-red-400' :
                 'text-purple-400'
               )} />
               <p className={cn('text-xs font-medium',
-                claim.status === 'Approved' && claim.confidence < 100 ? 'text-green-400' :
+                claim.status === 'Approved' && claim.confidence >= 92 ? 'text-green-400' :
                 claim.status === 'Approved' ? 'text-blue-400' :
                 claim.status === 'Denied' ? 'text-red-400' :
                 'text-purple-400'
               )}>
-                {claim.status === 'Approved' && claim.confidence < 100 ? 'Auto-resolved — released for payment' :
-                 claim.status === 'Approved' && claim.confidence === 100 ? 'Manual-Resolved — approved by examiner' :
+                {claim.status === 'Approved' && claim.confidence >= 92 ? 'Auto-resolved — released for payment' :
+                 claim.status === 'Approved' ? 'Manual-Resolved — approved by examiner' :
                  claim.status === 'Denied' ? 'Denied — claim rejected by examiner' :
                  'Manual Processing Required — sent to manual adjudication'}
               </p>

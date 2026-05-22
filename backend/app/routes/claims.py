@@ -240,14 +240,18 @@ async def decide_claim(claim_id: str, req: DecisionRequest, user=Depends(require
     """, (claim_id, user["id"], req.action, req.reason, req.notes, user["id"], req.action, req.reason, req.notes))
 
     new_status = "Pending"
-    new_confidence = 0
     if req.action == "approve":
         new_status = "Approved"
-        new_confidence = 100
+        # Keep original AI confidence — don't override to 100
+        cur.execute("UPDATE claims SET status=%s, updated_at=NOW() WHERE id=%s", (new_status, claim_id))
     elif req.action == "deny":
         new_status = "Denied"
-
-    cur.execute("UPDATE claims SET status=%s, confidence=%s, updated_at=NOW() WHERE id=%s", (new_status, new_confidence, claim_id))
+        # Keep original AI confidence — don't reset to 0
+        cur.execute("UPDATE claims SET status=%s, updated_at=NOW() WHERE id=%s", (new_status, claim_id))
+    else:
+        # manual-review — keep confidence, change status to show it needs manual processing
+        new_status = "Pending"
+        cur.execute("UPDATE claims SET status=%s, updated_at=NOW() WHERE id=%s", (new_status, claim_id))
     conn.commit()
     cur.close()
     conn.close()
