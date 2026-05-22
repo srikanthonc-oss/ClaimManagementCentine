@@ -160,7 +160,7 @@ export default function DashboardPage() {
 
   // Loading state
   if (isLoading) {
-    return <PageLoader message="Fetching claims from database..." variant="cards" />
+    return <PageLoader message="Fetching claims from database..." />
   }
 
   if (fetchError) {

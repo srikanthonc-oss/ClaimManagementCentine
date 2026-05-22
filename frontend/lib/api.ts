@@ -50,6 +50,8 @@ export const api = {
     uploads: () => request('/api/claims/uploads'),
     upload: (claims: any[], fileName: string, platform: string) =>
       request('/api/claims/upload', { method: 'POST', body: JSON.stringify({ claims, fileName, platform }) }),
+    uploadReference: (data: any) =>
+      request('/api/claims/upload-reference', { method: 'POST', body: JSON.stringify(data) }),
     process: (id: string, agentResult: any) =>
       request(`/api/claims/${id}/process`, { method: 'POST', body: JSON.stringify({ agentResult }) }),
     runAgents: (id: string) =>

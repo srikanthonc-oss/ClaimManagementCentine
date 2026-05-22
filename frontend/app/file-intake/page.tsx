@@ -32,6 +32,7 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadingSpinner } from '@/components/loading-spinner'
+import { PageLoader } from '@/components/page-loader'
 import {
   Dialog,
   DialogContent,
@@ -46,10 +47,13 @@ export default function FileIntakePage() {
   const [showClearConfirm, setShowClearConfirm] = React.useState(false)
   const [selectedPlatform, setSelectedPlatform] = React.useState<Platform | ''>('')
   const [isProcessing, setIsProcessing] = React.useState(false)
+  const [isPageLoading, setIsPageLoading] = React.useState(true)
   const [uploadResult, setUploadResult] = React.useState<FileUploadResult | null>(null)
   const [parsingError, setParsingError] = React.useState<string | null>(null)
   const [fileName, setFileName] = React.useState('')
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const refFileInputRef = React.useRef<HTMLInputElement>(null)
+  const [refUploadStatus, setRefUploadStatus] = React.useState<string | null>(null)
 
   // Local state instead of Zustand
   const [claims, setClaims] = React.useState<Claim[]>([])
@@ -85,6 +89,7 @@ export default function FileIntakePage() {
         }
       })
       .catch(() => {})
+      .finally(() => setIsPageLoading(false))
 
     api.claims.uploads()
       .then((data) => {
@@ -262,6 +267,55 @@ export default function FileIntakePage() {
     }
   }
 
+  // Handle reference data XLS upload (Hold_Code_Info, Claim_Header, Claim_Detail, etc.)
+  const handleReferenceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setRefUploadStatus('Uploading reference data...')
+
+    try {
+      const XLSX = await import('xlsx')
+      const arrayBuffer = await file.arrayBuffer()
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' })
+
+      const readSheet = (name: string): any[] => {
+        const sheet = workbook.Sheets[name]
+        if (!sheet) return []
+        const rows = XLSX.utils.sheet_to_json(sheet) as any[]
+        return rows
+      }
+
+      // Parse each sheet
+      const holdCodesRaw = readSheet('Hold_Code_Info')
+      const claimHeadersRaw = readSheet('Claim_Header')
+      const claimDetailsRaw = readSheet('Claim_Detail')
+      const denialDetailsRaw = readSheet('Denial_Details')
+      const cobHistoryRaw = readSheet('COBHistory')
+      const eobExtractionRaw = readSheet('COB_Image_Extraction')
+
+      // Map to API format
+      const holdCodes = holdCodesRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), lineNo: r['Line#'] || 1, history: r['History'] || '', reason: r['Reason'] || '', description: r['Description'] || '' }))
+      const claimHeaders = claimHeadersRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), memberId: String(r['Member Id'] || ''), specialty: r['Speciality'] || '', plcOfSvc: String(r['Plc of Svc'] || ''), par: r['Par'] || '' }))
+      const claimDetails = claimDetailsRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, cpt: String(r['CPT'] || ''), mod: String(r['Mod'] || ''), startDate: r['Start Date'] || '', endDate: r['End Date'] || '', units: r['Units'] || 1, billedAmt: r['Billed Amt'] || 0, allowedAmt: r['Allowed Amt'] || 0, copay: r['Copay'] || 0, coins: r['Coins'] || 0, ocPaid: r['OC Paid'] || 0 }))
+      const denialDetails = denialDetailsRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), lineNo: r['Line#'] || 1, history: r['History'] || '', reasonCode: r['Rsn Code'] || '' }))
+      const cobHistory = cobHistoryRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, primaryInsurance: r['Primary Insurance'] || '', effectiveDate: r['Effective Date'] || '', termDate: r['Term Date'] || '' }))
+      const eobExtraction = eobExtractionRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, cpt: String(r['CPT'] || ''), insuranceName: r['Insurance Name'] || '', paidAmt: r['Paid Amt'] || 0, adjGrpCode: r['Adj Grp Code'] || '', reason: String(r['Rsn'] || ''), prAmount: r['PR amount'] || 0 }))
+
+      const result = await api.claims.uploadReference({ holdCodes, claimHeaders, claimDetails, denialDetails, cobHistory, eobExtraction })
+      setRefUploadStatus(`Reference data uploaded: ${JSON.stringify(result.counts)}`)
+      setTimeout(() => setRefUploadStatus(null), 5000)
+    } catch (err: any) {
+      setRefUploadStatus(`Error: ${err.message}`)
+      setTimeout(() => setRefUploadStatus(null), 5000)
+    } finally {
+      if (refFileInputRef.current) refFileInputRef.current.value = ''
+    }
+  }
+
+  if (isPageLoading) {
+    return <PageLoader message="Loading file intake data..." />
+  }
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -292,9 +346,22 @@ export default function FileIntakePage() {
           {(currentUser?.role === 'admin' || currentUser?.role === 'examiner') && (
             <Button size="sm" className="h-8 gap-2 text-xs" onClick={() => setIsDialogOpen(true)}>
               <Upload className="h-3.5 w-3.5" />
-              Upload File
+              Upload Claims
             </Button>
           )}
+          {(currentUser?.role === 'admin') && claims.length > 0 && (
+            <Button size="sm" variant="outline" className="h-8 gap-2 text-xs" onClick={() => refFileInputRef.current?.click()}>
+              <Database className="h-3.5 w-3.5" />
+              Upload Reference Data
+            </Button>
+          )}
+          <input
+            ref={refFileInputRef}
+            type="file"
+            accept=".xls,.xlsx"
+            className="hidden"
+            onChange={handleReferenceUpload}
+          />
         </div>
       </div>
 
@@ -305,6 +372,16 @@ export default function FileIntakePage() {
           <p className="text-xs text-green-600 dark:text-green-400">
             Added <strong>{uploadResult.claimsParsed}</strong> claims for <strong>{selectedPlatform}</strong> · Total: {claims.length} claims
           </p>
+        </div>
+      )}
+
+      {/* Reference data upload status */}
+      {refUploadStatus && (
+        <div className={cn('flex items-center gap-2 rounded-lg border px-4 py-2',
+          refUploadStatus.startsWith('Error') ? 'border-red-500 bg-red-500/10' : 'border-blue-500 bg-blue-500/10'
+        )}>
+          <Database className="h-4 w-4 text-blue-400" />
+          <p className="text-xs text-blue-400">{refUploadStatus}</p>
         </div>
       )}
 

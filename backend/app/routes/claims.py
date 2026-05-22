@@ -167,6 +167,104 @@ async def upload_claims(req: ClaimUploadRequest, user=Depends(require_role("admi
     return {"upload_id": upload_id, "claimsCreated": inserted}
 
 
+class ReferenceDataRequest(BaseModel):
+    holdCodes: Optional[List[dict]] = []
+    claimHeaders: Optional[List[dict]] = []
+    claimDetails: Optional[List[dict]] = []
+    denialDetails: Optional[List[dict]] = []
+    cobHistory: Optional[List[dict]] = []
+    eobExtraction: Optional[List[dict]] = []
+
+
+@router.post("/upload-reference")
+async def upload_reference_data(req: ReferenceDataRequest, user=Depends(require_role("admin", "examiner"))):
+    """Upload reference data (Hold_Code_Info, Claim_Header, Claim_Detail, etc.) into agent tables."""
+    conn = get_db()
+    cur = conn.cursor()
+    counts = {}
+
+    # Helper to get claim_id from claim_number
+    def get_cid(claim_num):
+        cur.execute("SELECT id FROM claims WHERE claim_number = %s", (str(claim_num),))
+        row = cur.fetchone()
+        return str(row[0]) if row else None
+
+    # Hold Codes
+    inserted = 0
+    for row in (req.holdCodes or []):
+        cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
+        if cid:
+            cur.execute("DELETE FROM claim_hold_codes WHERE claim_id = %s AND line_no = %s", (cid, row.get("lineNo") or row.get("Line#") or 1))
+            cur.execute("INSERT INTO claim_hold_codes (claim_id, line_no, hold_code, history, reason, description) VALUES (%s,%s,%s,%s,%s,%s)",
+                (cid, row.get("lineNo") or row.get("Line#") or 1, row.get("reason") or row.get("Reason") or "", row.get("history") or row.get("History") or "", row.get("reason") or row.get("Reason") or "", row.get("description") or row.get("Description") or ""))
+            inserted += 1
+    counts["holdCodes"] = inserted
+
+    # Claim Headers
+    inserted = 0
+    for row in (req.claimHeaders or []):
+        cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
+        if cid:
+            cur.execute("DELETE FROM claim_header_detail WHERE claim_id = %s", (cid,))
+            cur.execute("INSERT INTO claim_header_detail (claim_id, member_id, specialty, place_of_service, par_status, received_date) VALUES (%s,%s,%s,%s,%s,%s)",
+                (cid, row.get("memberId") or row.get("Member Id") or "", row.get("specialty") or row.get("Speciality") or "", row.get("plcOfSvc") or row.get("Plc of Svc") or "", row.get("par") or row.get("Par") or "", row.get("receivedDate") or ""))
+            inserted += 1
+    counts["claimHeaders"] = inserted
+
+    # Claim Details
+    inserted = 0
+    for row in (req.claimDetails or []):
+        cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
+        if cid:
+            cur.execute("INSERT INTO claim_detail_lines (claim_id, line_no, cpt, modifier, start_date, end_date, units, billed_amt, allowed_amt, copay, coinsurance, oc_paid) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                (cid, row.get("sno") or row.get("Sno") or 1, row.get("cpt") or row.get("CPT") or "", row.get("mod") or row.get("Mod") or "", row.get("startDate") or row.get("Start Date") or "", row.get("endDate") or row.get("End Date") or "", row.get("units") or row.get("Units") or 1, row.get("billedAmt") or row.get("Billed Amt") or 0, row.get("allowedAmt") or row.get("Allowed Amt") or 0, row.get("copay") or row.get("Copay") or 0, row.get("coins") or row.get("Coins") or 0, row.get("ocPaid") or row.get("OC Paid") or 0))
+            inserted += 1
+    counts["claimDetails"] = inserted
+
+    # Denial Details
+    inserted = 0
+    for row in (req.denialDetails or []):
+        cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
+        if cid:
+            cur.execute("DELETE FROM claim_denial_details WHERE claim_id = %s", (cid,))
+            cur.execute("INSERT INTO claim_denial_details (claim_id, line_no, history, reason_code) VALUES (%s,%s,%s,%s)",
+                (cid, row.get("lineNo") or row.get("Line#") or 1, row.get("history") or row.get("History") or "", row.get("reasonCode") or row.get("Rsn Code") or ""))
+            inserted += 1
+    counts["denialDetails"] = inserted
+
+    # COB History
+    inserted = 0
+    for row in (req.cobHistory or []):
+        cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
+        if cid:
+            cur.execute("INSERT INTO claim_cob_history (claim_id, sno, primary_insurance, effective_date, term_date) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                (cid, row.get("sno") or row.get("Sno") or 1, row.get("primaryInsurance") or row.get("Primary Insurance") or "", row.get("effectiveDate") or row.get("Effective Date") or "", row.get("termDate") or row.get("Term Date") or ""))
+            inserted += 1
+    counts["cobHistory"] = inserted
+
+    # EOB Extraction
+    inserted = 0
+    for row in (req.eobExtraction or []):
+        cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
+        if cid:
+            cur.execute("DELETE FROM claim_eob_extraction WHERE claim_id = %s", (cid,))
+            cur.execute("INSERT INTO claim_eob_extraction (claim_id, sno, cpt, insurance_name, paid_amt, adj_grp_code, reason_code, pr_amount) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (cid, row.get("sno") or row.get("Sno") or 1, row.get("cpt") or row.get("CPT") or "", row.get("insuranceName") or row.get("Insurance Name") or "", row.get("paidAmt") or row.get("Paid Amt") or 0, row.get("adjGrpCode") or row.get("Adj Grp Code") or "", row.get("reason") or row.get("Rsn") or "", row.get("prAmount") or row.get("PR amount") or 0))
+            inserted += 1
+    counts["eobExtraction"] = inserted
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    try:
+        log_audit(user["id"], "reference_upload", "reference", None, counts)
+    except Exception:
+        pass
+
+    return {"message": "Reference data uploaded", "counts": counts}
+
+
 @router.post("/{claim_id}/run-agents")
 async def run_agents(claim_id: str, user=Depends(require_role("admin", "examiner"))):
     """Run the full 8-stage agent pipeline for a claim."""

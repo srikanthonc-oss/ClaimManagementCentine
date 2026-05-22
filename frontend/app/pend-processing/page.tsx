@@ -101,6 +101,7 @@ function generateReasoningSteps(claim: Claim) {
 export default function PendProcessingPage() {
   const [claims, setClaims] = React.useState<Claim[]>([])
   const [isPageLoading, setIsPageLoading] = React.useState(true)
+  const [selectedClaimIds, setSelectedClaimIds] = React.useState<Set<string>>(new Set())
   const selectedPlatforms = useUIStore((state) => state.selectedPlatforms)
   const togglePlatform = useUIStore((state) => state.togglePlatform)
   const clearPlatformFilters = useUIStore((state) => state.clearPlatformFilters)
@@ -375,8 +376,10 @@ export default function PendProcessingPage() {
     if (filteredClaims.length === 0 || isProcessing) return
     setIsProcessing(true)
 
-    // Only process claims that haven't been processed yet (status=Pending, confidence=0)
-    const claimsToProcess = filteredClaims.filter((c) => c.status === 'Pending' && c.confidence === 0)
+    // Only process selected claims, or all unprocessed if none selected
+    const claimsToProcess = selectedClaimIds.size > 0
+      ? filteredClaims.filter((c) => selectedClaimIds.has(c.id) && c.status === 'Pending' && c.confidence === 0)
+      : filteredClaims.filter((c) => c.status === 'Pending' && c.confidence === 0)
     if (claimsToProcess.length === 0) {
       setIsProcessing(false)
       return
@@ -396,6 +399,7 @@ export default function PendProcessingPage() {
       }
     }
     setIsProcessing(false)
+    setSelectedClaimIds(new Set())
   }
 
   // Check if a claim has been processed
@@ -403,7 +407,7 @@ export default function PendProcessingPage() {
 
   // Loading state
   if (isPageLoading) {
-    return <PageLoader message="Loading claims inventory..." variant="table" />
+    return <PageLoader message="Loading claims inventory..." />
   }
 
   // Empty state
@@ -449,7 +453,7 @@ export default function PendProcessingPage() {
               ) : (
                 <>
                   <Play className="h-3.5 w-3.5" />
-                  Run Pend Resolution
+                  Run Pend Resolution{selectedClaimIds.size > 0 ? ` (${selectedClaimIds.size})` : ''}
                 </>
               )}
             </Button>
@@ -653,6 +657,18 @@ export default function PendProcessingPage() {
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-muted/80 backdrop-blur">
               <tr className="border-b">
+                <th className="text-center px-2 py-2.5 w-8">
+                  <Checkbox
+                    checked={filteredClaims.length > 0 && selectedClaimIds.size === filteredClaims.filter(c => c.status === 'Pending' && c.confidence === 0).length && selectedClaimIds.size > 0}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedClaimIds(new Set(filteredClaims.filter(c => c.status === 'Pending' && c.confidence === 0).map(c => c.id)))
+                      } else {
+                        setSelectedClaimIds(new Set())
+                      }
+                    }}
+                  />
+                </th>
                 <th className="text-left px-3 py-2.5 font-medium text-muted-foreground cursor-pointer select-none" onClick={() => handleSort('claimNumber')}>
                   <span className="inline-flex items-center gap-1">Claim # {getSortIcon('claimNumber')}</span>
                 </th>
@@ -685,6 +701,21 @@ export default function PendProcessingPage() {
                 const processed = isClaimProcessed(claim.id)
                 return (
                   <tr key={claim.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                    <td className="text-center px-2 py-2.5 w-8">
+                      {claim.status === 'Pending' && claim.confidence === 0 && (
+                        <Checkbox
+                          checked={selectedClaimIds.has(claim.id)}
+                          onCheckedChange={(checked) => {
+                            setSelectedClaimIds((prev) => {
+                              const next = new Set(prev)
+                              if (checked) next.add(claim.id)
+                              else next.delete(claim.id)
+                              return next
+                            })
+                          }}
+                        />
+                      )}
+                    </td>
                     <td className="px-3 py-2.5">
                       <span className="font-medium">{claim.claimNumber}</span>
                     </td>
