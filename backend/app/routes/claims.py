@@ -167,6 +167,83 @@ async def upload_claims(req: ClaimUploadRequest, user=Depends(require_role("admi
     return {"upload_id": upload_id, "claimsCreated": inserted}
 
 
+@router.post("/{claim_id}/run-agents")
+async def run_agents(claim_id: str, user=Depends(require_role("admin", "examiner"))):
+    """Run the full 8-stage agent pipeline for a claim."""
+    from app.agents.orchestrator import run_orchestrator
+
+    result = run_orchestrator(claim_id)
+
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    try:
+        from app.services.audit import log_audit
+        log_audit(user["id"], "claims_run_agents", "claim", claim_id, {"confidence": result.get("confidence"), "status": result.get("status")})
+    except Exception:
+        pass
+
+    return result
+
+
+@router.get("/{claim_id}/agent-output")
+async def get_agent_output(claim_id: str, user=Depends(get_current_user)):
+    """Get the full agent pipeline output for a claim (all 8 stages)."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Get stage outputs
+    cur.execute("""
+        SELECT stage_number, stage_name, agent_name, output_data, outcome, confidence, reasoning, executed_at
+        FROM agent_stage_outputs WHERE claim_id = %s ORDER BY stage_number
+    """, (claim_id,))
+    cols = [desc[0] for desc in cur.description]
+    stages = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    # Get extracted data
+    cur.execute("SELECT * FROM claim_hold_codes WHERE claim_id = %s ORDER BY line_no", (claim_id,))
+    hold_codes = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
+
+    cur.execute("SELECT * FROM claim_detail_lines WHERE claim_id = %s ORDER BY line_no", (claim_id,))
+    detail_lines = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
+
+    cur.execute("SELECT * FROM claim_cob_history WHERE claim_id = %s ORDER BY sno", (claim_id,))
+    cob_history = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
+
+    cur.execute("SELECT * FROM claim_eob_extraction WHERE claim_id = %s ORDER BY sno", (claim_id,))
+    eob_extraction = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
+
+    cur.execute("SELECT * FROM claim_denial_details WHERE claim_id = %s ORDER BY line_no", (claim_id,))
+    denial_details = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
+
+    cur.execute("SELECT * FROM claim_header_detail WHERE claim_id = %s", (claim_id,))
+    header_row = cur.fetchone()
+    header_detail = dict(zip([d[0] for d in cur.description], header_row)) if header_row else None
+
+    cur.close()
+    conn.close()
+
+    # Serialize UUIDs and datetimes
+    def serialize(obj):
+        if isinstance(obj, list):
+            return [serialize(item) for item in obj]
+        if isinstance(obj, dict):
+            return {k: str(v) if hasattr(v, 'hex') or hasattr(v, 'isoformat') else (float(v) if hasattr(v, 'as_integer_ratio') else v) for k, v in obj.items()}
+        return obj
+
+    return {
+        "stages": serialize(stages),
+        "extracted_data": {
+            "hold_codes": serialize(hold_codes),
+            "detail_lines": serialize(detail_lines),
+            "cob_history": serialize(cob_history),
+            "eob_extraction": serialize(eob_extraction),
+            "denial_details": serialize(denial_details),
+            "header_detail": serialize(header_detail),
+        }
+    }
+
+
 @router.post("/{claim_id}/process")
 async def process_claim(claim_id: str, req: ProcessRequest, user=Depends(require_role("admin", "examiner"))):
     """Store agent processing result for a claim and update its status/confidence."""
