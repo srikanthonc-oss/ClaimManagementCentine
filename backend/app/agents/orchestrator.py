@@ -78,8 +78,17 @@ def run_orchestrator(claim_id: str) -> dict:
                 confidences.append(50)
     overall_confidence = round(sum(confidences) / len(confidences)) if confidences else 0
 
+    # Read threshold from DB for status determination
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT auto_resolve FROM routing_thresholds WHERE id = 'global'")
+    threshold_row = cur.fetchone()
+    auto_resolve_threshold = threshold_row[0] if threshold_row else 92
+    cur.close()
+    conn.close()
+
     # Stage 1: AI Summary
-    summary = generate_ai_summary(claim, results, overall_confidence)
+    summary = generate_ai_summary(claim, results, overall_confidence, auto_resolve_threshold)
     results["stage_1"] = summary
     store_stage_output(claim["id"], 1, "AI Extracted Data Summary", "Resolution Orchestrator",
                        {"claim_number": claim["claim_number"]}, summary, "Summarized", "High", summary.get("reasoning", ""))
@@ -87,7 +96,8 @@ def run_orchestrator(claim_id: str) -> dict:
     # Update claim confidence and status
     conn = get_db()
     cur = conn.cursor()
-    new_status = "Approved" if overall_confidence >= 92 else "InReview"
+
+    new_status = "Approved" if overall_confidence >= auto_resolve_threshold else "InReview"
     cur.execute("UPDATE claims SET confidence = %s, status = %s, updated_at = NOW() WHERE id = %s",
                 (overall_confidence, new_status, claim["id"]))
 
@@ -114,7 +124,7 @@ def run_orchestrator(claim_id: str) -> dict:
     return {"claim_id": claim["id"], "confidence": overall_confidence, "status": new_status, "stages": results}
 
 
-def generate_ai_summary(claim: dict, results: dict, confidence: int) -> dict:
+def generate_ai_summary(claim: dict, results: dict, confidence: int, threshold: int = 92) -> dict:
     """Generate the AI summary bullets from all stage results."""
     net_amount = results.get("stage_6", {}).get("net_amount", 0) or 0
     try:
@@ -132,6 +142,6 @@ def generate_ai_summary(claim: dict, results: dict, confidence: int) -> dict:
         f"Net payable: ${net_amount:.2f}",
         f"Posting: {results.get('stage_7', {}).get('outcome', 'N/A')}",
         f"Validation: {results.get('stage_8', {}).get('outcome', 'N/A')}",
-        f"Overall confidence: {confidence}% — {'Auto-resolve' if confidence >= 92 else 'HITL Required'}",
+        f"Overall confidence: {confidence}% — {'Auto-resolve' if confidence >= threshold else 'HITL Required'}",
     ]
     return {"bullets": bullets, "confidence": "High", "outcome": "Summarized", "reasoning": "; ".join(bullets[:3])}

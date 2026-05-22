@@ -43,6 +43,7 @@ import {
 export default function FileIntakePage() {
   const router = useRouter()
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
+  const [showClearConfirm, setShowClearConfirm] = React.useState(false)
   const [selectedPlatform, setSelectedPlatform] = React.useState<Platform | ''>('')
   const [isProcessing, setIsProcessing] = React.useState(false)
   const [uploadResult, setUploadResult] = React.useState<FileUploadResult | null>(null)
@@ -282,9 +283,7 @@ export default function FileIntakePage() {
               size="sm"
               variant="ghost"
               className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive"
-              onClick={() => {
-                api.claims.clearAll().then(() => { setClaims([]); setUploads([]) }).catch(() => {})
-              }}
+              onClick={() => setShowClearConfirm(true)}
             >
               <Trash2 className="h-3.5 w-3.5" />
               Clear All
@@ -621,6 +620,42 @@ export default function FileIntakePage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Clear All Confirmation Dialog */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/60" onClick={() => setShowClearConfirm(false)} />
+          <div className="relative z-50 w-full max-w-sm rounded-lg border bg-background p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold">Clear All Data</h3>
+                <p className="text-[10px] text-muted-foreground">This action cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">
+              All data including backend database records (claims, agent results, upload history, and reference data) will be permanently deleted.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setShowClearConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="h-8 text-xs bg-destructive hover:bg-destructive/90"
+                onClick={() => {
+                  api.claims.clearAll().then(() => { setClaims([]); setUploads([]) }).catch(() => {})
+                  setShowClearConfirm(false)
+                }}
+              >
+                Yes, Clear All
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

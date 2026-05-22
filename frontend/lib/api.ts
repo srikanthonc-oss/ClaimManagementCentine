@@ -84,4 +84,9 @@ export const api = {
     update: (autoResolve: number, hitlLow: number) =>
       request('/api/thresholds', { method: 'PUT', body: JSON.stringify({ autoResolve, hitlLow }) }),
   },
+
+  agents: {
+    list: () => request('/api/agents'),
+    toggle: (id: string) => request(`/api/agents/${id}/toggle`, { method: 'PUT' }),
+  },
 }

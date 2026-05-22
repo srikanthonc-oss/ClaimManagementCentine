@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
-from app.routes import auth, claims, data_sources, users, dashboard, thresholds
+from app.routes import auth, claims, data_sources, users, dashboard, thresholds, agents
 from app.db.pool import init_db
 
 load_dotenv()
@@ -45,6 +45,7 @@ app.include_router(data_sources.router, prefix="/api/data-sources", tags=["Data 
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(thresholds.router, prefix="/api/thresholds", tags=["Thresholds"])
+app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
 
 
 @app.get("/api/health")

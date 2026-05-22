@@ -193,6 +193,20 @@ def init_db():
             extracted_at TIMESTAMP DEFAULT NOW()
         );
 
+        -- Agent registry (which agents are enabled/disabled)
+        CREATE TABLE IF NOT EXISTS agent_registry (
+            id VARCHAR(50) PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            description TEXT,
+            model VARCHAR(100),
+            model_type VARCHAR(20) DEFAULT 'rules',
+            stage VARCHAR(10),
+            latency VARCHAR(20),
+            success_rate VARCHAR(20),
+            is_enabled BOOLEAN DEFAULT true,
+            updated_at TIMESTAMP DEFAULT NOW()
+        );
+
         -- Agent stage outputs (individual stage results stored separately)
         CREATE TABLE IF NOT EXISTS agent_stage_outputs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

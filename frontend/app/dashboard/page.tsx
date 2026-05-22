@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { api } from '@/lib/api'
+import { PageLoader } from '@/components/page-loader'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import type { Claim, Classification } from '@/types'
@@ -157,22 +158,9 @@ export default function DashboardPage() {
     return `${claim.classification} — manual review required`
   }
 
-  // Empty state
+  // Loading state
   if (isLoading) {
-    return (
-      <div className="space-y-5">
-        <div>
-          <p className="text-xs text-primary font-medium">PendResolve AI · Operations</p>
-          <h1 className="text-2xl font-bold mt-1">Pend Resolution Dashboard</h1>
-          <p className="text-xs text-muted-foreground">Real-time view across core claims platforms, AI agents, and HITL workbenches.</p>
-        </div>
-        <div className="rounded-lg border border-dashed p-12 text-center">
-          <Activity className="mx-auto h-8 w-8 text-muted-foreground animate-pulse" />
-          <h3 className="mt-3 text-sm font-semibold">Loading claims data...</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Fetching from database</p>
-        </div>
-      </div>
-    )
+    return <PageLoader message="Fetching claims from database..." variant="cards" />
   }
 
   if (fetchError) {

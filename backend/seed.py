@@ -28,7 +28,7 @@ def seed():
     # Create default thresholds
     cur.execute("""
         INSERT INTO routing_thresholds (id, auto_resolve, hitl_low)
-        VALUES ('global', 92, 60)
+        VALUES ('global', 90, 60)
         ON CONFLICT (id) DO NOTHING
     """)
 

@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { useAuthStore } from '@/stores/auth-store'
+import { api } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -180,24 +181,19 @@ export default function AIFunctionsPage() {
   const currentUser = useAuthStore((state) => state.currentUser)
   const isAdmin = currentUser?.role === 'admin'
 
-  // Persist enabled agents to localStorage
-  const [enabledAgents, setEnabledAgents] = React.useState<Set<string>>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('ai-agent-registry')
-      if (stored) {
-        try {
-          return new Set(JSON.parse(stored) as string[])
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    return new Set(agents.map((a) => a.id))
-  })
+  // Fetch agent enabled/disabled state from backend API
+  const [enabledAgents, setEnabledAgents] = React.useState<Set<string>>(new Set(agents.map((a) => a.id)))
 
   React.useEffect(() => {
-    localStorage.setItem('ai-agent-registry', JSON.stringify([...enabledAgents]))
-  }, [enabledAgents])
+    api.agents.list()
+      .then((data: any[]) => {
+        if (Array.isArray(data)) {
+          const enabled = new Set(data.filter((a: any) => a.is_enabled).map((a: any) => a.id))
+          setEnabledAgents(enabled)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   // Test agent state
   const [testingAgent, setTestingAgent] = React.useState<string | null>(null)
@@ -205,15 +201,19 @@ export default function AIFunctionsPage() {
 
   const toggleAgent = (id: string) => {
     if (!isAdmin) return
-    setEnabledAgents((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
+    api.agents.toggle(id)
+      .then((result: any) => {
+        setEnabledAgents((prev) => {
+          const next = new Set(prev)
+          if (result.is_enabled) {
+            next.add(id)
+          } else {
+            next.delete(id)
+          }
+          return next
+        })
+      })
+      .catch(() => {})
   }
 
   const handleTestAgent = (agentId: string) => {

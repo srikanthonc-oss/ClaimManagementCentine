@@ -27,6 +27,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { ClaimDetailView } from '@/components/claim-detail-view'
+import { PageLoader } from '@/components/page-loader'
 import { api } from '@/lib/api'
 
 // Agent reasoning steps that vary by classification
@@ -99,6 +100,7 @@ function generateReasoningSteps(claim: Claim) {
 
 export default function PendProcessingPage() {
   const [claims, setClaims] = React.useState<Claim[]>([])
+  const [isPageLoading, setIsPageLoading] = React.useState(true)
   const selectedPlatforms = useUIStore((state) => state.selectedPlatforms)
   const togglePlatform = useUIStore((state) => state.togglePlatform)
   const clearPlatformFilters = useUIStore((state) => state.clearPlatformFilters)
@@ -141,19 +143,17 @@ export default function PendProcessingPage() {
         }
       })
       .catch(() => {})
+      .finally(() => setIsPageLoading(false))
   }, [])
 
   const canExecute = currentUser?.role === 'admin' || currentUser?.role === 'examiner'
 
-  // Read routing thresholds from localStorage (same as AI Functions page)
-  const autoResolveThreshold = React.useMemo(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('ai-routing-thresholds')
-      if (stored) {
-        try { return (JSON.parse(stored) as { autoResolve: number }).autoResolve } catch { /* ignore */ }
-      }
-    }
-    return 92 // default
+  // Read routing threshold from backend API
+  const [autoResolveThreshold, setAutoResolveThreshold] = React.useState(92)
+  React.useEffect(() => {
+    api.thresholds.get()
+      .then((data) => { if (data?.autoResolve) setAutoResolveThreshold(data.autoResolve) })
+      .catch(() => {})
   }, [])
 
   const [activeTab, setActiveTab] = React.useState<'all' | 'auto-resolved' | 'needs-review' | 'approved' | 'denied' | 'pend-back'>('all')
@@ -400,6 +400,11 @@ export default function PendProcessingPage() {
 
   // Check if a claim has been processed
   const isClaimProcessed = (claimId: string) => processedIds.has(claimId)
+
+  // Loading state
+  if (isPageLoading) {
+    return <PageLoader message="Loading claims inventory..." variant="table" />
+  }
 
   // Empty state
   if (claims.length === 0) {
