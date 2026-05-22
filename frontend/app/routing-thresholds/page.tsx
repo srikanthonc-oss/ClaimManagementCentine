@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Shield, Save, CheckCircle2 } from 'lucide-react'
+import { Shield, Save, CheckCircle2, Loader2 } from 'lucide-react'
 
 export default function RoutingThresholdsPage() {
   const currentUser = useAuthStore((state) => state.currentUser)
@@ -17,6 +17,7 @@ export default function RoutingThresholdsPage() {
   })
 
   const [saved, setSaved] = React.useState(false)
+  const [isLoading, setIsLoading] = React.useState(true)
 
   // Fetch thresholds from API on mount
   React.useEffect(() => {
@@ -27,6 +28,7 @@ export default function RoutingThresholdsPage() {
         }
       })
       .catch(() => {})
+      .finally(() => setIsLoading(false))
   }, [])
 
   const handleSave = () => {
@@ -49,6 +51,15 @@ export default function RoutingThresholdsPage() {
           <h3 className="mt-3 text-sm font-semibold">Access Denied</h3>
           <p className="mt-1 text-xs text-muted-foreground">Only administrators can configure routing thresholds</p>
         </div>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-3">
+        <Loader2 className="h-8 w-8 text-primary animate-spin" />
+        <p className="text-sm text-muted-foreground">Loading thresholds...</p>
       </div>
     )
   }
