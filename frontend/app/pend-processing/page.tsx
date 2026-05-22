@@ -1,10 +1,9 @@
-﻿'use client'
+'use client'
 
 import * as React from 'react'
 import { useUIStore } from '@/stores/ui-store'
 import { useDataSourcesStore } from '@/stores/data-sources-store'
 import { useAuthStore } from '@/stores/auth-store'
-import { generateAgentResult } from '@/stores/agent-results-store'
 import { cn, formatCurrency } from '@/lib/utils'
 import type { Claim, Platform, Classification } from '@/types'
 import {
@@ -372,7 +371,7 @@ export default function PendProcessingPage() {
   }, [categoryData, activeCategory])
 
   // Run Pend Processing â€” simulates agents running on filtered claims only
-  const handleRunProcessing = () => {
+  const handleRunProcessing = async () => {
     if (filteredClaims.length === 0 || isProcessing) return
     setIsProcessing(true)
 
@@ -382,31 +381,21 @@ export default function PendProcessingPage() {
       setIsProcessing(false)
       return
     }
-    let index = 0
-    const interval = setInterval(() => {
-      if (index >= claimsToProcess.length) {
-        clearInterval(interval)
-        setIsProcessing(false)
-        return
+
+    for (const claim of claimsToProcess) {
+      try {
+        const result = await api.claims.runAgents(claim.id)
+        const confidence = result.confidence || 0
+        const status = result.status === 'InReview' ? 'In Review' : result.status
+        setClaims((prev) => prev.map((c) =>
+          c.id === claim.id ? { ...c, confidence, status: status as Claim['status'] } : c
+        ))
+        setProcessedIds((prev) => new Set([...prev, claim.id]))
+      } catch (err) {
+        console.error('[RunAgents] Error:', err)
       }
-
-      const claim = claimsToProcess[index]
-      // Generate agent result with simulated data
-      const agentResult = generateAgentResult(claim)
-      const confidence = agentResult.confidenceBreakdown.overall
-
-      // Update claim locally
-      const outcome = confidence >= autoResolveThreshold ? 'Approved' : 'In Review'
-      setClaims((prev) => prev.map((c) =>
-        c.id === claim.id ? { ...c, confidence, status: outcome as Claim['status'] } : c
-      ))
-
-      // Store in backend DB
-      api.claims.process(claim.id, agentResult).catch(() => {})
-
-      setProcessedIds((prev) => new Set([...prev, claim.id]))
-      index++
-    }, 50) // 50ms per claim for visible progress
+    }
+    setIsProcessing(false)
   }
 
   // Check if a claim has been processed

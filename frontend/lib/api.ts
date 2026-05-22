@@ -52,6 +52,10 @@ export const api = {
       request('/api/claims/upload', { method: 'POST', body: JSON.stringify({ claims, fileName, platform }) }),
     process: (id: string, agentResult: any) =>
       request(`/api/claims/${id}/process`, { method: 'POST', body: JSON.stringify({ agentResult }) }),
+    runAgents: (id: string) =>
+      request(`/api/claims/${id}/run-agents`, { method: 'POST' }),
+    getAgentOutput: (id: string) =>
+      request(`/api/claims/${id}/agent-output`),
     decide: (id: string, action: string, reason: string | null, notes: string) =>
       request(`/api/claims/${id}/decide`, { method: 'POST', body: JSON.stringify({ action, reason, notes }) }),
     clearAll: () => request('/api/claims', { method: 'DELETE' }),
