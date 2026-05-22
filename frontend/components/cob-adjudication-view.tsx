@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
 import type { Claim } from '@/types'
 import {
   ChevronDown,
@@ -17,6 +18,7 @@ import {
   Activity,
   Users,
   Brain,
+  Loader2,
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -38,7 +40,30 @@ interface COBAdjudicationViewProps {
   claim: Claim
 }
 
-// ─── Reference Data Helpers ──────────────────────────────────────────────────
+interface AgentStage {
+  stage_number: number
+  stage_name: string
+  agent_name: string
+  output_data: any
+  outcome: string
+  confidence: string
+  reasoning: string
+  executed_at: string
+}
+
+interface AgentOutput {
+  stages: AgentStage[]
+  extracted_data: {
+    hold_codes: any[]
+    detail_lines: any[]
+    cob_history: any[]
+    eob_extraction: any[]
+    denial_details: any[]
+    header_detail: any
+  }
+}
+
+// ─── Fallback Local Data Helpers ─────────────────────────────────────────────
 
 function getClaimDetailLines(claim: Claim) {
   if (claim.claimNumber.startsWith('899929')) {
@@ -154,24 +179,405 @@ function StageSection({ stage, expanded, onToggle }: { stage: StageData; expande
   )
 }
 
-// ─── Main Component ──────────────────────────────────────────────────────────
+// ─── Helpers for mapping API data to outcome status ──────────────────────────
 
-export function COBAdjudicationView({ claim }: COBAdjudicationViewProps) {
-  const [expandedStages, setExpandedStages] = React.useState<Set<number>>(new Set([1, 2, 3]))
+function mapOutcomeToStatus(outcome: string): OutcomeStatus {
+  const lower = outcome.toLowerCase()
+  if (lower.includes('denied') || lower.includes('fail') || lower.includes('dnnpr') || lower.includes('dn0')) return 'fail'
+  if (lower.includes('human review') || lower.includes('duplicate') || lower.includes('warning')) return 'warning'
+  return 'pass'
+}
 
-  const toggleStage = (id: number) => {
-    setExpandedStages((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+function mapConfidence(confidence: string): ConfidenceLevel {
+  if (confidence === 'High' || confidence === 'Medium' || confidence === 'Low') return confidence
+  return 'Medium'
+}
+
+const STAGE_ICONS: Record<number, React.ReactNode> = {
+  1: <Brain className="h-3.5 w-3.5 text-purple-400" />,
+  2: <Shield className="h-3.5 w-3.5 text-amber-400" />,
+  3: <Users className="h-3.5 w-3.5 text-green-400" />,
+  4: <Clock className="h-3.5 w-3.5 text-cyan-400" />,
+  5: <Activity className="h-3.5 w-3.5 text-indigo-400" />,
+  6: <Calculator className="h-3.5 w-3.5 text-emerald-400" />,
+  7: <Send className="h-3.5 w-3.5 text-orange-400" />,
+  8: <ShieldCheck className="h-3.5 w-3.5 text-teal-400" />,
+}
+
+// ─── Stage Content Renderers (from API data) ─────────────────────────────────
+
+function renderStage1Content(data: any): React.ReactNode {
+  const bullets: string[] = data.bullets || []
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold text-muted-foreground">Quick Brief — AI Extracted Summary</p>
+      <ul className="space-y-1.5 text-xs list-disc list-inside">
+        {bullets.map((bullet: string, i: number) => (
+          <li key={i}>{bullet}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function renderStage2Content(data: any): React.ReactNode {
+  const holdCodes: any[] = data.hold_codes || []
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-semibold text-muted-foreground">Source: Hold_Code_Info</p>
+      <div className="overflow-auto">
+        <table className="w-full text-[10px] border">
+          <thead>
+            <tr className="bg-muted/50">
+              <th className="text-left px-2 py-1 border-r font-semibold">Line</th>
+              <th className="text-left px-2 py-1 border-r font-semibold">Hold Code</th>
+              <th className="text-left px-2 py-1 border-r font-semibold">History</th>
+              <th className="text-left px-2 py-1 border-r font-semibold">Reason</th>
+              <th className="text-left px-2 py-1 font-semibold">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {holdCodes.map((hc: any, i: number) => (
+              <tr key={i} className="border-t">
+                <td className="px-2 py-1 border-r font-mono">{hc.line_no}</td>
+                <td className="px-2 py-1 border-r font-mono font-semibold">{hc.hold_code}</td>
+                <td className="px-2 py-1 border-r">{hc.history || 'Blank'}</td>
+                <td className="px-2 py-1 border-r font-mono">{hc.reason}</td>
+                <td className="px-2 py-1">{hc.description}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="rounded border p-2 space-y-1 text-[10px]">
+        <p className="font-semibold text-muted-foreground mb-1">Analysis:</p>
+        <p className={cn(data.has_cob_code ? 'text-green-400' : 'text-red-400')}>
+          {data.has_cob_code ? '✓' : '✗'} COB hold code identified
+        </p>
+        <p className={cn(!data.has_duplicate ? 'text-green-400' : 'text-amber-400')}>
+          {!data.has_duplicate ? '✓' : '⚠'} {data.has_duplicate ? 'Duplicate indicator found' : 'No duplicate indicators'}
+        </p>
+      </div>
+      <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
+        mapOutcomeToStatus(data.outcome) === 'pass' ? 'bg-green-500/10 border border-green-500/30 text-green-400' :
+        mapOutcomeToStatus(data.outcome) === 'fail' ? 'bg-red-500/10 border border-red-500/30 text-red-400' :
+        'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+      )}>
+        Outcome: {data.outcome}
+      </div>
+    </div>
+  )
+}
+
+function renderStage3Content(data: any): React.ReactNode {
+  const cobHistory: any[] = data.cob_history || []
+  const eobExtraction: any[] = data.eob_extraction || []
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-semibold text-muted-foreground">Source: COBHistory, COB_Image_Extraction</p>
+      <div className="space-y-2 text-xs">
+        <p className="text-[10px] font-semibold">COB History</p>
+        <div className="overflow-auto">
+          <table className="w-full text-[10px] border">
+            <thead>
+              <tr className="bg-muted/50">
+                <th className="text-left px-2 py-1 border-r font-semibold">#</th>
+                <th className="text-left px-2 py-1 border-r font-semibold">Primary Insurance</th>
+                <th className="text-left px-2 py-1 border-r font-semibold">Effective Date</th>
+                <th className="text-left px-2 py-1 font-semibold">Term Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cobHistory.map((row: any, i: number) => (
+                <tr key={i} className="border-t">
+                  <td className="px-2 py-1 border-r">{row.sno}</td>
+                  <td className="px-2 py-1 border-r font-semibold">{row.primary_insurance}</td>
+                  <td className="px-2 py-1 border-r font-mono">{row.effective_date}</td>
+                  <td className="px-2 py-1 font-mono">{row.term_date}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {eobExtraction.length > 0 && (
+          <>
+            <p className="text-[10px] font-semibold mt-2">EOB Extraction</p>
+            <div className="overflow-auto">
+              <table className="w-full text-[10px] border">
+                <thead>
+                  <tr className="bg-muted/50">
+                    <th className="text-left px-2 py-1 border-r font-semibold">#</th>
+                    <th className="text-left px-2 py-1 border-r font-semibold">CPT</th>
+                    <th className="text-left px-2 py-1 border-r font-semibold">Insurance</th>
+                    <th className="text-right px-2 py-1 border-r font-semibold">Paid</th>
+                    <th className="text-left px-2 py-1 border-r font-semibold">Adj Grp</th>
+                    <th className="text-left px-2 py-1 border-r font-semibold">Reason</th>
+                    <th className="text-right px-2 py-1 font-semibold">PR Amt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {eobExtraction.map((row: any, i: number) => (
+                    <tr key={i} className="border-t">
+                      <td className="px-2 py-1 border-r">{row.sno}</td>
+                      <td className="px-2 py-1 border-r font-mono">{row.cpt}</td>
+                      <td className="px-2 py-1 border-r">{row.insurance_name}</td>
+                      <td className="px-2 py-1 border-r text-right">${Number(row.paid_amt).toFixed(2)}</td>
+                      <td className="px-2 py-1 border-r font-mono">{row.adj_grp_code}</td>
+                      <td className="px-2 py-1 border-r font-mono">{row.reason_code}</td>
+                      <td className="px-2 py-1 text-right">${Number(row.pr_amount).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+        <div className="rounded border p-2 space-y-1.5">
+          <div className="flex justify-between"><span className="text-muted-foreground">Primary Insurance</span><span className="font-semibold">{data.primary_insurance}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Total PR Amount</span><span className="font-mono font-semibold">${Number(data.total_pr_amount || 0).toFixed(2)}</span></div>
+        </div>
+      </div>
+      <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
+        mapOutcomeToStatus(data.outcome) === 'pass' ? 'bg-green-500/10 border border-green-500/30 text-green-400' : 'bg-red-500/10 border border-red-500/30 text-red-400'
+      )}>
+        Outcome: {data.outcome}
+      </div>
+    </div>
+  )
+}
+
+function renderStage4Content(data: any): React.ReactNode {
+  const withinLimit = data.within_limit
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-semibold text-muted-foreground">Source: Claim_Header, Claim_Detail</p>
+      <div className="space-y-2 text-xs">
+        <div className="rounded border p-2 space-y-1.5">
+          <div className="flex justify-between"><span className="text-muted-foreground">Days Aged</span><span className={cn('font-bold', withinLimit ? 'text-green-400' : 'text-red-400')}>{data.days_aged} days</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">State</span><span className="font-semibold">{data.state}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Filing Limit</span><span className="font-mono">{data.filing_limit} days</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Days Remaining</span><span className={cn('font-semibold', data.days_remaining > 30 ? 'text-green-400' : data.days_remaining > 0 ? 'text-amber-400' : 'text-red-400')}>{data.days_remaining} days</span></div>
+        </div>
+        <div className="rounded border p-2 text-[10px]">
+          <p className="font-semibold text-muted-foreground mb-1">Formula:</p>
+          <p className="font-mono">Days Aged = {data.days_aged} days</p>
+          <p className="font-mono mt-1">Threshold ({data.state}): {data.filing_limit} days</p>
+          <p className={cn('mt-1 font-semibold', withinLimit ? 'text-green-400' : 'text-red-400')}>
+            {data.days_aged} {withinLimit ? '<' : '>'} {data.filing_limit} → {withinLimit ? 'PASS' : 'FAIL'}
+          </p>
+        </div>
+      </div>
+      <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
+        withinLimit ? 'bg-green-500/10 border border-green-500/30 text-green-400' : 'bg-red-500/10 border border-red-500/30 text-red-400'
+      )}>
+        Outcome: {data.outcome}
+      </div>
+    </div>
+  )
+}
+
+function renderStage5Content(data: any): React.ReactNode {
+  const prCodeAnalysis = data.pr_code_analysis || {}
+  const primaryCodes: string[] = prCodeAnalysis.primary_codes || []
+  const secondaryCodes: string[] = prCodeAnalysis.secondary_codes || []
+  const denyCodes: string[] = prCodeAnalysis.deny_codes || []
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-semibold text-muted-foreground">Source: COB_Image_Extraction, Claim_Detail</p>
+      <div className="space-y-2 text-xs">
+        <div className="rounded border p-2 space-y-1.5">
+          <div className="flex justify-between"><span className="text-muted-foreground">Coordination Type</span><span className="font-semibold">{data.coordination_type}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Action</span><span className="font-semibold">{data.outcome}</span></div>
+        </div>
+        <div className="rounded border p-2 space-y-1 text-[10px]">
+          <p className="font-semibold text-muted-foreground mb-1">PR Code Analysis:</p>
+          <p className={cn(primaryCodes.length > 0 ? 'text-green-400' : 'text-muted-foreground')}>
+            {primaryCodes.length > 0 ? '✓' : '○'} Primary Indicators (96/204): {primaryCodes.length > 0 ? primaryCodes.join(', ') : 'None'}
+          </p>
+          <p className={cn(secondaryCodes.length > 0 ? 'text-green-400' : 'text-muted-foreground')}>
+            {secondaryCodes.length > 0 ? '✓' : '○'} Secondary Indicators (1/2/3): {secondaryCodes.length > 0 ? secondaryCodes.join(', ') : 'None'}
+          </p>
+          <p className={cn(denyCodes.length > 0 ? 'text-red-400' : 'text-muted-foreground')}>
+            {denyCodes.length > 0 ? '✗' : '○'} Deny Indicators (CO-45): {denyCodes.length > 0 ? denyCodes.join(', ') : 'None'}
+          </p>
+        </div>
+      </div>
+      <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
+        mapOutcomeToStatus(data.outcome) === 'pass' ? 'bg-green-500/10 border border-green-500/30 text-green-400' :
+        mapOutcomeToStatus(data.outcome) === 'fail' ? 'bg-red-500/10 border border-red-500/30 text-red-400' :
+        'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+      )}>
+        Outcome: {data.outcome}
+      </div>
+    </div>
+  )
+}
+
+function renderStage6Content(data: any): React.ReactNode {
+  const lineCalcs: any[] = data.line_calculations || []
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-semibold text-muted-foreground">Source: Claim_Detail, COB_Image_Extraction</p>
+      <div className="space-y-2 text-xs">
+        <div className="overflow-auto">
+          <table className="w-full text-[10px] border">
+            <thead>
+              <tr className="bg-muted/50">
+                <th className="text-left px-2 py-1 border-r font-semibold">Line</th>
+                <th className="text-right px-2 py-1 border-r font-semibold">Billed</th>
+                <th className="text-right px-2 py-1 border-r font-semibold">Allowed</th>
+                <th className="text-right px-2 py-1 border-r font-semibold">OC Paid</th>
+                <th className="text-right px-2 py-1 border-r font-semibold">PR Share</th>
+                <th className="text-right px-2 py-1 border-r font-semibold">Non-Covered</th>
+                <th className="text-right px-2 py-1 font-semibold">Net Payable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lineCalcs.map((line: any, i: number) => (
+                <tr key={i} className="border-t">
+                  <td className="px-2 py-1 border-r font-mono">{line.line_no}</td>
+                  <td className="px-2 py-1 border-r text-right">${Number(line.billed).toFixed(2)}</td>
+                  <td className="px-2 py-1 border-r text-right">${Number(line.allowed).toFixed(2)}</td>
+                  <td className="px-2 py-1 border-r text-right">${Number(line.oc_paid).toFixed(2)}</td>
+                  <td className="px-2 py-1 border-r text-right">${Number(line.pr_share).toFixed(2)}</td>
+                  <td className="px-2 py-1 border-r text-right">${Number(line.non_covered).toFixed(2)}</td>
+                  <td className="px-2 py-1 text-right font-semibold">${Number(line.net_payable).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="grid grid-cols-4 gap-2 text-[10px]">
+          <div className="rounded border p-2 text-center">
+            <p className="text-muted-foreground">Total PR</p>
+            <p className="font-bold text-sm">${Number(data.total_pr || 0).toFixed(2)}</p>
+          </div>
+          <div className="rounded border p-2 text-center">
+            <p className="text-muted-foreground">Allowed</p>
+            <p className="font-bold text-sm">${Number(data.total_allowed || 0).toFixed(2)}</p>
+          </div>
+          <div className="rounded border p-2 text-center">
+            <p className="text-muted-foreground">Non-Covered</p>
+            <p className="font-bold text-sm">${Number(data.non_covered || 0).toFixed(2)}</p>
+          </div>
+          <div className="rounded border p-2 text-center">
+            <p className="text-muted-foreground">Net Amount</p>
+            <p className="font-bold text-sm text-green-400">${Number(data.net_amount || 0).toFixed(2)}</p>
+          </div>
+        </div>
+        <div className="rounded border p-2 space-y-1.5 text-[10px]">
+          <p className="font-semibold text-muted-foreground">Condition Applied: {data.condition_applied}</p>
+          <p className="font-mono text-muted-foreground">OC Paid: ${Number(data.total_oc_paid || 0).toFixed(2)}</p>
+        </div>
+      </div>
+      <div className="rounded px-2 py-1.5 text-[10px] font-semibold bg-green-500/10 border border-green-500/30 text-green-400">
+        Outcome: Net Payable ${Number(data.net_amount || 0).toFixed(2)} — Recommend posting
+      </div>
+    </div>
+  )
+}
+
+function renderStage7Content(data: any): React.ReactNode {
+  const postingData = data.posting_data || {}
+  const denialCodes: string[] = data.denial_codes || []
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-semibold text-muted-foreground">Source: COB Calculation Output</p>
+      <div className="space-y-2 text-xs">
+        <div className="rounded border p-2 space-y-1.5">
+          <p className="text-[10px] font-semibold text-muted-foreground">Posting Recommendation:</p>
+          <div className="flex justify-between"><span className="text-muted-foreground">Disposition</span><span className="font-semibold">{postingData.disposition || 'N/A'}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Allowed Amount</span><span className="font-mono">${Number(postingData.allowed_amount || 0).toFixed(2)}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Non-Covered</span><span className="font-mono">${Number(postingData.non_covered || 0).toFixed(2)}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Net Payable</span><span className="font-mono font-semibold">${Number(postingData.net_payable || 0).toFixed(2)}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Copay</span><span className="font-mono">${Number(postingData.copay || 0).toFixed(2)}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Coinsurance</span><span className="font-mono">${Number(postingData.coinsurance || 0).toFixed(2)}</span></div>
+        </div>
+        {denialCodes.length > 0 && (
+          <div className="rounded border p-2 space-y-1.5">
+            <p className="text-[10px] font-semibold text-muted-foreground">Denial Codes:</p>
+            {denialCodes.map((code: string, i: number) => (
+              <p key={i} className="font-mono text-red-400">{code}</p>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
+        'bg-green-500/10 border border-green-500/30 text-green-400'
+      )}>
+        Outcome: {data.outcome}
+      </div>
+    </div>
+  )
+}
+
+function renderStage8Content(data: any): React.ReactNode {
+  const checks: any[] = data.validation_checks || []
+  const issues: string[] = data.issues_found || []
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-semibold text-muted-foreground">Validation Checks ({data.checks_passed}/{data.total_checks} passed)</p>
+      <div className="space-y-2 text-xs">
+        <div className="rounded border p-2 space-y-1.5">
+          {checks.map((check: any, i: number) => (
+            <div key={i} className="flex justify-between items-center">
+              <span className="text-muted-foreground">{check.check}</span>
+              <span className={cn('inline-flex items-center gap-1', check.passed ? 'text-green-400' : 'text-red-400')}>
+                {check.passed ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                {check.detail || (check.passed ? 'Passed' : 'Failed')}
+              </span>
+            </div>
+          ))}
+        </div>
+        {issues.length > 0 && (
+          <div className="rounded border border-red-500/30 p-2 space-y-1">
+            <p className="text-[10px] font-semibold text-red-400">Issues Found:</p>
+            {issues.map((issue: string, i: number) => (
+              <p key={i} className="text-red-400 text-[10px]">• {issue}</p>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
+        issues.length === 0 ? 'bg-green-500/10 border border-green-500/30 text-green-400' : 'bg-red-500/10 border border-red-500/30 text-red-400'
+      )}>
+        Outcome: {data.outcome}
+      </div>
+    </div>
+  )
+}
+
+function renderStageContent(stageNumber: number, data: any): React.ReactNode {
+  switch (stageNumber) {
+    case 1: return renderStage1Content(data)
+    case 2: return renderStage2Content(data)
+    case 3: return renderStage3Content(data)
+    case 4: return renderStage4Content(data)
+    case 5: return renderStage5Content(data)
+    case 6: return renderStage6Content(data)
+    case 7: return renderStage7Content(data)
+    case 8: return renderStage8Content(data)
+    default: return <pre className="text-[10px] whitespace-pre-wrap">{JSON.stringify(data, null, 2)}</pre>
   }
+}
 
-  const expandAll = () => setExpandedStages(new Set([1, 2, 3, 4, 5, 6, 7, 8]))
-  const collapseAll = () => setExpandedStages(new Set())
+// ─── Build stages from API response ─────────────────────────────────────────
 
-  // Generate data
+function buildStagesFromAPI(apiStages: AgentStage[]): StageData[] {
+  return apiStages.map((stage) => ({
+    id: stage.stage_number,
+    title: stage.stage_name,
+    icon: STAGE_ICONS[stage.stage_number] || <Brain className="h-3.5 w-3.5 text-purple-400" />,
+    outcome: mapOutcomeToStatus(stage.outcome),
+    outcomeLabel: stage.outcome,
+    confidence: mapConfidence(stage.confidence),
+    content: renderStageContent(stage.stage_number, stage.output_data),
+  }))
+}
+
+// ─── Fallback: Build stages from local data (for unprocessed claims) ─────────
+
+function buildStagesLocally(claim: Claim): StageData[] {
   const lines = getClaimDetailLines(claim)
   const holdCode = getHoldCodeInfo(claim)
   const denial = getDenialDetails(claim)
@@ -185,49 +591,35 @@ export function COBAdjudicationView({ claim }: COBAdjudicationViewProps) {
   const totalPR = eob.prAmount
   const totalBilled = lines.reduce((s, l) => s + l.billed, 0)
 
-  // ─── COB Calculation Logic (3 conditions) ────────────────────────────────────
-  // Condition 1: OC Paid > Total PR Amount → Non-Covered = (OC Paid - Allowed) - PR Amount
-  // Condition 2: OC Paid < Total PR Amount → Non-Covered = 0, Net Amount = 0
-  // Condition 3: OC Paid = "" → Non-Covered = 0, Allowed Amount = PR Amount
-
   const cobCalcLines = lines.map((line) => {
     const linePR = line.copay + line.coins
     let nonCovered = 0
     let netAmount = 0
     let conditionApplied = 1
-
     if (line.ocPaid > linePR) {
-      // Condition 1
       nonCovered = (line.ocPaid - line.allowed) - linePR
       if (nonCovered < 0) nonCovered = 0
       netAmount = line.allowed - linePR - nonCovered
       conditionApplied = 1
     } else if (line.ocPaid < linePR) {
-      // Condition 2
       nonCovered = 0
       netAmount = 0
       conditionApplied = 2
     } else {
-      // Condition 3 (equal or empty treated as condition 1 fallback)
       nonCovered = 0
       netAmount = line.allowed - linePR
       conditionApplied = 3
     }
-
     return { ...line, nonCovered, netAmount, conditionApplied }
   })
 
   const totalNonCovered = cobCalcLines.reduce((s, l) => s + l.nonCovered, 0)
   const totalNetAmount = cobCalcLines.reduce((s, l) => s + l.netAmount, 0)
 
-  // ─── Timely Filing Calculation ─────────────────────────────────────────────
-  const receivedDate = claim.recvDt || '8/3/25'
-  const dos = lines[0]?.startDt || '06/15/2025'
   const dateDiff = claim.daysAged
-  const timelyFilingLimit = claim.state === 'KY' ? 365 : 365
+  const timelyFilingLimit = 365
   const isTimelyFiled = dateDiff <= timelyFilingLimit
 
-  // ─── Hold Code Validation Logic ────────────────────────────────────────────
   const holdCodeValid = holdCode.reason === 'COBOC' || holdCode.reason === 'COBHD'
   const historyIsH = holdCode.history === 'H'
   const hasDuplicateCode = denial.reasonCode.includes('EXDUC')
@@ -239,428 +631,268 @@ export function COBAdjudicationView({ claim }: COBAdjudicationViewProps) {
         ? 'Continue COB Review'
         : 'Human Review Required'
 
-  // ─── Member Eligibility Logic ──────────────────────────────────────────────
   const primaryInsurance = cobHistory[0]
   const eobInsurance = eob.insurance
   const insuranceMatch = primaryInsurance.insurance === eobInsurance
   const eobHasPR = eob.adjGrpCode.includes('PR')
-  const eobPresent = true // simulated: EOB is present
 
   let eligibilityOutcome = 'Primary Insurance Verified'
-  if (!eobPresent) {
-    eligibilityOutcome = primaryInsurance.insurance === 'Medicare' ? 'DN017' : 'DN018'
-  } else if (!insuranceMatch) {
+  if (!insuranceMatch) {
     eligibilityOutcome = primaryInsurance.insurance === 'Medicare' ? 'DN017' : 'DN018'
   } else if (!eobHasPR) {
     eligibilityOutcome = 'DNEOB'
   }
 
-  // ─── Coordination Rule Logic ───────────────────────────────────────────────
   const prReasons = eob.reason.split(',').map((r: string) => r.trim())
   const hasPrimaryIndicator = prReasons.some((r: string) => ['96', '204'].includes(r))
   const hasSecondaryIndicator = prReasons.some((r: string) => ['1', '2', '3'].includes(r))
   const hasCO45 = eob.adjGrpCode.includes('CO') && prReasons.includes('45')
 
   let coordinationOutcome = 'Human Review Required'
-  let actionType = 'Human Review Required'
   if (hasCO45) {
     coordinationOutcome = 'DNNPR'
-    actionType = 'Deny'
   } else if (hasPrimaryIndicator) {
     coordinationOutcome = 'Pay as Primary'
-    actionType = 'Pay as Primary'
   } else if (hasSecondaryIndicator) {
     coordinationOutcome = 'Pay as Secondary'
-    actionType = 'Coordination (Pay as Secondary)'
   }
 
-  // ─── Build 8 Stages ───────────────────────────────────────────────────────
-
-  const stages: StageData[] = [
-    // Stage 1: AI Extracted Data Summary
+  return [
     {
       id: 1,
       title: 'AI Extracted Data Summary',
       icon: <Brain className="h-3.5 w-3.5 text-purple-400" />,
-      outcome: 'pass',
+      outcome: 'pass' as OutcomeStatus,
       outcomeLabel: 'Summarized',
-      confidence: 'High',
+      confidence: 'High' as ConfidenceLevel,
       content: (
         <div className="space-y-2">
-          <p className="text-[10px] font-semibold text-muted-foreground">Quick Brief — as per given datasource</p>
+          <p className="text-[10px] font-semibold text-muted-foreground">Quick Brief — locally generated</p>
           <ul className="space-y-1.5 text-xs list-disc list-inside">
             <li>Claim Number: <span className="font-mono font-semibold">{claim.claimNumber}</span></li>
             <li>Classification: <span className="font-semibold">{claim.classification}</span> — Hold Code: <span className="font-mono">{holdCode.reason}</span></li>
-            <li>Hold Description: {holdCode.description}</li>
-            <li>Primary Insurance Identified: <span className="font-semibold">{primaryInsurance.insurance}</span> (Effective: {primaryInsurance.effectiveDate} – {primaryInsurance.termDate})</li>
-            <li>Total Billed: <span className="font-semibold">${totalBilled.toFixed(2)}</span> | Total Allowed: <span className="font-semibold">${totalAllowed.toFixed(2)}</span></li>
-            <li>OC Paid by Primary: <span className="font-semibold">${totalOcPaid.toFixed(2)}</span> | PR Amount from EOB: <span className="font-semibold">${eob.prAmount.toFixed(2)}</span></li>
-            <li>Denial Code on File: <span className="font-mono font-semibold">{denial.reasonCode}</span> (Line {denial.lineNo})</li>
-            <li>Timely Filing Status: Received {receivedDate}, aged {dateDiff} days — {isTimelyFiled ? 'Within Window' : 'EXCEEDED'}</li>
-            <li>EOB Adjustment Group Codes: <span className="font-mono">{eob.adjGrpCode}</span>, Reason: {eob.reason}</li>
-            <li>Recommended Action: <span className="font-semibold">{coordinationOutcome === 'Pay as Secondary' ? 'Process as Secondary Payer' : coordinationOutcome}</span></li>
+            <li>Primary Insurance: <span className="font-semibold">{primaryInsurance.insurance}</span></li>
+            <li>Total Billed: <span className="font-semibold">${totalBilled.toFixed(2)}</span> | Allowed: <span className="font-semibold">${totalAllowed.toFixed(2)}</span></li>
+            <li>OC Paid: <span className="font-semibold">${totalOcPaid.toFixed(2)}</span> | PR Amount: <span className="font-semibold">${eob.prAmount.toFixed(2)}</span></li>
+            <li>Days Aged: {dateDiff} — {isTimelyFiled ? 'Within Window' : 'EXCEEDED'}</li>
           </ul>
         </div>
       ),
     },
-    // Stage 2: Hold and Denial Code Validation
     {
       id: 2,
       title: 'Hold and Denial Code Validation',
       icon: <Shield className="h-3.5 w-3.5 text-amber-400" />,
-      outcome: holdCodeOutcome === 'Continue COB Review' ? 'pass' : holdCodeOutcome === 'Already Processed' ? 'fail' : 'warning',
+      outcome: (holdCodeOutcome === 'Continue COB Review' ? 'pass' : holdCodeOutcome === 'Already Processed' ? 'fail' : 'warning') as OutcomeStatus,
       outcomeLabel: holdCodeOutcome,
-      confidence: 'High',
+      confidence: 'High' as ConfidenceLevel,
       content: (
         <div className="space-y-3">
-          <p className="text-[10px] font-semibold text-muted-foreground">Source: Hold_Code_Info — as per given datasource</p>
-          <div className="space-y-2 text-xs">
-            <div className="rounded border p-2 space-y-1.5">
-              <div className="flex justify-between"><span className="text-muted-foreground">Hold Code Identified</span><span className="font-mono font-semibold">{holdCode.reason}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">History Status</span><span className={cn('font-semibold', historyIsH ? 'text-red-400' : 'text-green-400')}>{holdCode.history || 'Blank (Not Processed)'}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Denial Codes Present</span><span className="font-mono">{denial.reasonCode}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Duplicate Indicators</span><span>{hasDuplicateCode ? 'EXDUC Found' : 'None'}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Processing Eligibility</span><span className="font-semibold">{holdCodeValid ? 'Qualifies for COB Processing' : 'Does Not Qualify'}</span></div>
-            </div>
-            <div className="rounded border p-2 space-y-1 text-[10px]">
-              <p className="font-semibold text-muted-foreground mb-1">Business Rules Applied:</p>
-              <p className={cn(holdCodeValid ? 'text-green-400' : 'text-red-400')}>
-                {holdCodeValid ? '✓' : '✗'} Hold code belongs to COBOC or COBHD → {holdCodeValid ? 'Qualifies' : 'Does not qualify'}
-              </p>
-              <p className={cn(!historyIsH ? 'text-green-400' : 'text-red-400')}>
-                {!historyIsH ? '✓' : '✗'} History column is NOT &quot;H&quot; → {!historyIsH ? 'Not previously processed' : 'Already Processed'}
-              </p>
-              <p className={cn(!hasDuplicateCode ? 'text-green-400' : 'text-amber-400')}>
-                {!hasDuplicateCode ? '✓' : '⚠'} Denial code does not contain EXDUC → {!hasDuplicateCode ? 'No duplicate' : 'Follow duplicate instruction'}
-              </p>
-            </div>
-          </div>
-          <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
-            holdCodeOutcome === 'Continue COB Review' ? 'bg-green-500/10 border border-green-500/30 text-green-400' :
-            holdCodeOutcome === 'Already Processed' ? 'bg-red-500/10 border border-red-500/30 text-red-400' :
-            'bg-amber-500/10 border border-amber-500/30 text-amber-400'
-          )}>
-            Outcome: {holdCodeOutcome}
+          <div className="rounded border p-2 space-y-1.5 text-xs">
+            <div className="flex justify-between"><span className="text-muted-foreground">Hold Code</span><span className="font-mono font-semibold">{holdCode.reason}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">History</span><span>{holdCode.history || 'Blank'}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Denial Code</span><span className="font-mono">{denial.reasonCode}</span></div>
           </div>
         </div>
       ),
     },
-    // Stage 3: Member Eligibility Agent
     {
       id: 3,
       title: 'Member Eligibility Agent',
       icon: <Users className="h-3.5 w-3.5 text-green-400" />,
-      outcome: eligibilityOutcome === 'Primary Insurance Verified' ? 'pass' : 'fail',
+      outcome: (eligibilityOutcome === 'Primary Insurance Verified' ? 'pass' : 'fail') as OutcomeStatus,
       outcomeLabel: eligibilityOutcome,
-      confidence: 'High',
+      confidence: 'High' as ConfidenceLevel,
       content: (
         <div className="space-y-3">
-          <p className="text-[10px] font-semibold text-muted-foreground">Source: COBHistory, COB_Image_Extraction — as per given datasource</p>
-          <div className="space-y-2 text-xs">
-            <div className="rounded border p-2 space-y-1.5">
-              <div className="flex justify-between"><span className="text-muted-foreground">Date of Service</span><span className="font-mono">{dos}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Coverage Effective Date</span><span className="font-mono">{primaryInsurance.effectiveDate}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Coverage Term Date</span><span className="font-mono">{primaryInsurance.termDate}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Identified Primary Insurance</span><span className="font-semibold">{primaryInsurance.insurance}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">EOB Insurance Name</span><span className="font-semibold">{eobInsurance}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Insurance Match Status</span><span className={cn('font-semibold', insuranceMatch ? 'text-green-400' : 'text-red-400')}>{insuranceMatch ? 'MATCH' : 'MISMATCH'}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">PR Codes Identified</span><span className={cn('font-mono', eobHasPR ? 'text-green-400' : 'text-red-400')}>{eobHasPR ? 'Yes (PR present)' : 'No PR codes'}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">EOB Completeness Status</span><span className={cn('font-semibold', eobPresent ? 'text-green-400' : 'text-red-400')}>{eobPresent ? 'EOB Attached' : 'EOB Missing'}</span></div>
-            </div>
-            <div className="rounded border p-2 space-y-1 text-[10px]">
-              <p className="font-semibold text-muted-foreground mb-1">Business Rules Applied:</p>
-              <p className="text-green-400">✓ DOS ({dos}) is after Effective Date ({primaryInsurance.effectiveDate}) AND Term Date ({primaryInsurance.termDate}) is after DOS</p>
-              <p className={cn(insuranceMatch ? 'text-green-400' : 'text-red-400')}>
-                {insuranceMatch ? '✓' : '✗'} EOB insurance ({eobInsurance}) {insuranceMatch ? 'matches' : 'does NOT match'} primary insurance ({primaryInsurance.insurance})
-              </p>
-              <p className={cn(eobHasPR ? 'text-green-400' : 'text-red-400')}>
-                {eobHasPR ? '✓' : '✗'} EOB {eobHasPR ? 'contains' : 'does NOT contain'} PR reasons → {!eobHasPR ? 'Deny DNEOB' : 'Pass'}
-              </p>
-            </div>
-          </div>
-          <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
-            eligibilityOutcome === 'Primary Insurance Verified' ? 'bg-green-500/10 border border-green-500/30 text-green-400' : 'bg-red-500/10 border border-red-500/30 text-red-400'
-          )}>
-            Outcome: {eligibilityOutcome}
+          <div className="rounded border p-2 space-y-1.5 text-xs">
+            <div className="flex justify-between"><span className="text-muted-foreground">Primary Insurance</span><span className="font-semibold">{primaryInsurance.insurance}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">EOB Insurance</span><span className="font-semibold">{eobInsurance}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Match</span><span className={cn(insuranceMatch ? 'text-green-400' : 'text-red-400')}>{insuranceMatch ? 'YES' : 'NO'}</span></div>
           </div>
         </div>
       ),
     },
-    // Stage 4: Timely Filing Validation
     {
       id: 4,
       title: 'Timely Filing Validation',
       icon: <Clock className="h-3.5 w-3.5 text-cyan-400" />,
-      outcome: isTimelyFiled ? 'pass' : 'fail',
+      outcome: (isTimelyFiled ? 'pass' : 'fail') as OutcomeStatus,
       outcomeLabel: isTimelyFiled ? 'Passed Timely Filing' : 'Denied - Timely Filing',
-      confidence: 'High',
+      confidence: 'High' as ConfidenceLevel,
       content: (
         <div className="space-y-3">
-          <p className="text-[10px] font-semibold text-muted-foreground">Source: Claim_Header, Claim_Detail — as per given datasource</p>
-          <div className="space-y-2 text-xs">
-            <div className="rounded border p-2 space-y-1.5">
-              <div className="flex justify-between"><span className="text-muted-foreground">Date of Service</span><span className="font-mono">{dos}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Received Date</span><span className="font-mono">{receivedDate}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">OC Paid Date</span><span className="font-mono">N/A</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">State</span><span className="font-semibold">{claim.state}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">DOS-to-Received Difference</span><span className={cn('font-bold', isTimelyFiled ? 'text-green-400' : 'text-red-400')}>{dateDiff} days</span></div>
-            </div>
-            <div className="rounded border p-2 text-[10px]">
-              <p className="font-semibold text-muted-foreground mb-1">Formula:</p>
-              <p className="font-mono">Date Diff = Received Date - Date of Service = {dateDiff} days</p>
-              <p className="font-mono mt-1">Threshold ({claim.state}): {timelyFilingLimit} days{claim.state === 'KY' ? ' (KY-specific logic)' : ''}</p>
-              <p className={cn('mt-1 font-semibold', isTimelyFiled ? 'text-green-400' : 'text-red-400')}>
-                {dateDiff} {isTimelyFiled ? '<' : '>'} {timelyFilingLimit} → {isTimelyFiled ? 'PASS' : 'FAIL'}
-              </p>
-            </div>
-          </div>
-          <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
-            isTimelyFiled ? 'bg-green-500/10 border border-green-500/30 text-green-400' : 'bg-red-500/10 border border-red-500/30 text-red-400'
-          )}>
-            Outcome: {isTimelyFiled ? 'Passed Timely Filing' : 'Denied - Timely Filing'}
+          <div className="rounded border p-2 space-y-1.5 text-xs">
+            <div className="flex justify-between"><span className="text-muted-foreground">Days Aged</span><span className="font-bold">{dateDiff} days</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Limit</span><span>{timelyFilingLimit} days</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className={cn(isTimelyFiled ? 'text-green-400' : 'text-red-400')}>{isTimelyFiled ? 'PASS' : 'FAIL'}</span></div>
           </div>
         </div>
       ),
     },
-    // Stage 5: Coordination Rule Determination
     {
       id: 5,
       title: 'Coordination Rule Determination',
       icon: <Activity className="h-3.5 w-3.5 text-indigo-400" />,
-      outcome: coordinationOutcome === 'Pay as Secondary' || coordinationOutcome === 'Pay as Primary' ? 'pass' : coordinationOutcome === 'DNNPR' ? 'fail' : 'warning',
+      outcome: (coordinationOutcome === 'Pay as Secondary' || coordinationOutcome === 'Pay as Primary' ? 'pass' : coordinationOutcome === 'DNNPR' ? 'fail' : 'warning') as OutcomeStatus,
       outcomeLabel: coordinationOutcome,
-      confidence: hasSecondaryIndicator || hasPrimaryIndicator || hasCO45 ? 'High' : 'Medium',
+      confidence: (hasSecondaryIndicator || hasPrimaryIndicator || hasCO45 ? 'High' : 'Medium') as ConfidenceLevel,
       content: (
         <div className="space-y-3">
-          <p className="text-[10px] font-semibold text-muted-foreground">Source: COB_Image_Extraction, Claim_Detail — as per given datasource</p>
-          <div className="space-y-2 text-xs">
-            {/* CPT Lines Summary */}
-            <div className="overflow-auto">
-              <table className="w-full text-[10px] border">
-                <thead>
-                  <tr className="bg-muted/50">
-                    <th className="text-left px-2 py-1 border-r font-semibold">CPT</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">Allowed</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">Copay</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">Coins</th>
-                    <th className="text-right px-2 py-1 font-semibold">Net</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((line) => (
-                    <tr key={line.lineNo} className="border-t">
-                      <td className="px-2 py-1 border-r font-mono">{line.cpt}</td>
-                      <td className="px-2 py-1 border-r text-right">${line.allowed.toFixed(2)}</td>
-                      <td className="px-2 py-1 border-r text-right">${line.copay.toFixed(2)}</td>
-                      <td className="px-2 py-1 border-r text-right">${line.coins.toFixed(2)}</td>
-                      <td className="px-2 py-1 text-right">${(line.allowed - line.copay - line.coins).toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="rounded border p-2 space-y-1.5">
-              <div className="flex justify-between"><span className="text-muted-foreground">Denial Codes</span><span className="font-mono">{denial.reasonCode}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Primary EOB Adj Group</span><span className="font-mono">{eob.adjGrpCode}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">PR/CO Reason Codes</span><span className="font-mono">{eob.reason}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Authorization Status</span><span className="text-green-400">Not Required</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Action Type</span><span className="font-semibold">{actionType}</span></div>
-            </div>
-            <div className="rounded border p-2 space-y-1 text-[10px]">
-              <p className="font-semibold text-muted-foreground mb-1">Rule Evaluation:</p>
-              <p className={cn(hasPrimaryIndicator ? 'text-green-400' : 'text-muted-foreground')}>
-                {hasPrimaryIndicator ? '✓' : '○'} PR 96/204 (Pay as Primary): {hasPrimaryIndicator ? 'DETECTED' : 'Not found'}
-              </p>
-              <p className={cn(hasSecondaryIndicator ? 'text-green-400' : 'text-muted-foreground')}>
-                {hasSecondaryIndicator ? '✓' : '○'} PR 1/2/3 (Pay as Secondary): {hasSecondaryIndicator ? 'DETECTED' : 'Not found'}
-              </p>
-              <p className={cn(hasCO45 ? 'text-red-400' : 'text-muted-foreground')}>
-                {hasCO45 ? '✗' : '○'} CO 45 (Deny DNNPR): {hasCO45 ? 'DETECTED' : 'Not found'}
-              </p>
-            </div>
-          </div>
-          <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
-            coordinationOutcome === 'Pay as Secondary' || coordinationOutcome === 'Pay as Primary' ? 'bg-green-500/10 border border-green-500/30 text-green-400' :
-            coordinationOutcome === 'DNNPR' ? 'bg-red-500/10 border border-red-500/30 text-red-400' :
-            'bg-amber-500/10 border border-amber-500/30 text-amber-400'
-          )}>
-            Outcome: {coordinationOutcome}
+          <div className="rounded border p-2 space-y-1.5 text-xs">
+            <div className="flex justify-between"><span className="text-muted-foreground">Coordination</span><span className="font-semibold">{coordinationOutcome}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">EOB Adj Group</span><span className="font-mono">{eob.adjGrpCode}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Reason Codes</span><span className="font-mono">{eob.reason}</span></div>
           </div>
         </div>
       ),
     },
-    // Stage 6: COB Calculation
     {
       id: 6,
       title: 'COB Calculation',
       icon: <Calculator className="h-3.5 w-3.5 text-emerald-400" />,
-      outcome: 'pass',
+      outcome: 'pass' as OutcomeStatus,
       outcomeLabel: 'Calculated',
-      confidence: 'High',
+      confidence: 'High' as ConfidenceLevel,
       content: (
         <div className="space-y-3">
-          <p className="text-[10px] font-semibold text-muted-foreground">Source: Claim_Detail, COB_Image_Extraction — as per given datasource</p>
-          <div className="space-y-2 text-xs">
-            {/* Financial Table */}
-            <div className="overflow-auto">
-              <table className="w-full text-[10px] border">
-                <thead>
-                  <tr className="bg-muted/50">
-                    <th className="text-left px-2 py-1 border-r font-semibold">CPT</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">Allowed</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">Copay</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">Coins</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">OC Paid</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">Non-Covered</th>
-                    <th className="text-right px-2 py-1 border-r font-semibold">Net</th>
-                    <th className="text-center px-2 py-1 font-semibold">Cond.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cobCalcLines.map((line) => (
-                    <tr key={line.lineNo} className="border-t">
-                      <td className="px-2 py-1 border-r font-mono">{line.cpt}</td>
-                      <td className="px-2 py-1 border-r text-right">${line.allowed.toFixed(2)}</td>
-                      <td className="px-2 py-1 border-r text-right">${line.copay.toFixed(2)}</td>
-                      <td className="px-2 py-1 border-r text-right">${line.coins.toFixed(2)}</td>
-                      <td className="px-2 py-1 border-r text-right">${line.ocPaid.toFixed(2)}</td>
-                      <td className="px-2 py-1 border-r text-right">${line.nonCovered.toFixed(2)}</td>
-                      <td className="px-2 py-1 border-r text-right font-semibold">${line.netAmount.toFixed(2)}</td>
-                      <td className="px-2 py-1 text-center font-mono">#{line.conditionApplied}</td>
-                    </tr>
-                  ))}
-                  <tr className="border-t bg-muted/30 font-semibold">
-                    <td className="px-2 py-1.5 border-r">TOTALS</td>
-                    <td className="px-2 py-1.5 border-r text-right">${totalAllowed.toFixed(2)}</td>
-                    <td className="px-2 py-1.5 border-r text-right">${totalCopay.toFixed(2)}</td>
-                    <td className="px-2 py-1.5 border-r text-right">${totalCoins.toFixed(2)}</td>
-                    <td className="px-2 py-1.5 border-r text-right">${totalOcPaid.toFixed(2)}</td>
-                    <td className="px-2 py-1.5 border-r text-right">${totalNonCovered.toFixed(2)}</td>
-                    <td className="px-2 py-1.5 border-r text-right text-green-400">${totalNetAmount.toFixed(2)}</td>
-                    <td className="px-2 py-1.5 text-center">—</td>
-                  </tr>
-                </tbody>
-              </table>
+          <div className="grid grid-cols-4 gap-2 text-[10px]">
+            <div className="rounded border p-2 text-center">
+              <p className="text-muted-foreground">Total PR</p>
+              <p className="font-bold text-sm">${totalPR.toFixed(2)}</p>
             </div>
-            {/* Summary Boxes */}
-            <div className="grid grid-cols-4 gap-2 text-[10px]">
-              <div className="rounded border p-2 text-center">
-                <p className="text-muted-foreground">Total PR</p>
-                <p className="font-bold text-sm">${totalPR.toFixed(2)}</p>
-              </div>
-              <div className="rounded border p-2 text-center">
-                <p className="text-muted-foreground">Allowed</p>
-                <p className="font-bold text-sm">${totalAllowed.toFixed(2)}</p>
-              </div>
-              <div className="rounded border p-2 text-center">
-                <p className="text-muted-foreground">Non-Covered</p>
-                <p className="font-bold text-sm">${totalNonCovered.toFixed(2)}</p>
-              </div>
-              <div className="rounded border p-2 text-center">
-                <p className="text-muted-foreground">Net Amount</p>
-                <p className="font-bold text-sm text-green-400">${totalNetAmount.toFixed(2)}</p>
-              </div>
+            <div className="rounded border p-2 text-center">
+              <p className="text-muted-foreground">Allowed</p>
+              <p className="font-bold text-sm">${totalAllowed.toFixed(2)}</p>
             </div>
-
-            {/* Formula Display */}
-            <div className="rounded border p-2 space-y-1.5 text-[10px]">
-              <p className="font-semibold text-muted-foreground">COB Calculation Formula (3 Conditions):</p>
-              <p className="font-mono text-muted-foreground">Condition 1: If OC Paid &gt; Total PR → Non-Covered = (OC Paid - Allowed) - PR Amount</p>
-              <p className="font-mono text-muted-foreground">Condition 2: If OC Paid &lt; Total PR → Non-Covered = 0, Net Amount = 0</p>
-              <p className="font-mono text-muted-foreground">Condition 3: If OC Paid = &quot;&quot; → Non-Covered = 0, Allowed = PR Amount</p>
+            <div className="rounded border p-2 text-center">
+              <p className="text-muted-foreground">Non-Covered</p>
+              <p className="font-bold text-sm">${totalNonCovered.toFixed(2)}</p>
             </div>
-          </div>
-          <div className="rounded px-2 py-1.5 text-[10px] font-semibold bg-green-500/10 border border-green-500/30 text-green-400">
-            Outcome: Net Payable ${totalNetAmount.toFixed(2)} — Recommend posting
+            <div className="rounded border p-2 text-center">
+              <p className="text-muted-foreground">Net Amount</p>
+              <p className="font-bold text-sm text-green-400">${totalNetAmount.toFixed(2)}</p>
+            </div>
           </div>
         </div>
       ),
     },
-    // Stage 7: Posting
     {
       id: 7,
       title: 'Posting',
       icon: <Send className="h-3.5 w-3.5 text-orange-400" />,
-      outcome: 'pass',
+      outcome: 'pass' as OutcomeStatus,
       outcomeLabel: 'Ready for Posting',
-      confidence: 'High',
+      confidence: 'High' as ConfidenceLevel,
       content: (
         <div className="space-y-3">
-          <p className="text-[10px] font-semibold text-muted-foreground">Source: COB Calculation Output — as per given datasource</p>
-          <div className="space-y-2 text-xs">
-            {/* Detail Screen Updates */}
-            <div className="rounded border p-2 space-y-1.5">
-              <p className="text-[10px] font-semibold text-muted-foreground">Detail Screen Updates:</p>
-              <div className="flex justify-between"><span className="text-muted-foreground">Allowed Amount</span><span className="font-mono font-semibold">${totalAllowed.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Non-Covered Amount</span><span className="font-mono">${totalNonCovered.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Allowed Reason</span><span className="font-mono">COB Secondary Calculation</span></div>
-            </div>
-            {/* Alt + WD Screen Updates */}
-            <div className="rounded border p-2 space-y-1.5">
-              <p className="text-[10px] font-semibold text-muted-foreground">Alt + WD Screen Updates:</p>
-              <div className="flex justify-between"><span className="text-muted-foreground">Denial Codes Applied</span><span className="font-mono">{denial.reasonCode}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Denial Reasons</span><span>{denial.reasonCode === 'DNNPR' ? 'Non-Participating Provider' : denial.reasonCode}</span></div>
-            </div>
-            {/* Coordination Adjustments */}
-            <div className="rounded border p-2 space-y-1.5">
-              <p className="text-[10px] font-semibold text-muted-foreground">Coordination Adjustments:</p>
-              <div className="flex justify-between"><span className="text-muted-foreground">DN001 Removal Status</span><span className="text-green-400">Not Applicable</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Authorization Updates</span><span className="text-green-400">No changes required</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Hold Code Release</span><span className="font-mono">{holdCode.reason} → Release</span></div>
-            </div>
-          </div>
-          <div className="rounded px-2 py-1.5 text-[10px] font-semibold bg-green-500/10 border border-green-500/30 text-green-400">
-            Outcome: Ready for Posting
+          <div className="rounded border p-2 space-y-1.5 text-xs">
+            <div className="flex justify-between"><span className="text-muted-foreground">Allowed Amount</span><span className="font-mono">${totalAllowed.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Non-Covered</span><span className="font-mono">${totalNonCovered.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Net Payable</span><span className="font-mono font-semibold">${totalNetAmount.toFixed(2)}</span></div>
           </div>
         </div>
       ),
     },
-    // Stage 8: Post Validation
     {
       id: 8,
       title: 'Post Validation',
       icon: <ShieldCheck className="h-3.5 w-3.5 text-teal-400" />,
-      outcome: 'pass',
+      outcome: 'pass' as OutcomeStatus,
       outcomeLabel: 'Claim Ready for Finalization',
-      confidence: 'High',
+      confidence: 'High' as ConfidenceLevel,
       content: (
         <div className="space-y-3">
-          <p className="text-[10px] font-semibold text-muted-foreground">Validation Checks — as per given datasource</p>
-          <div className="space-y-2 text-xs">
-            <div className="rounded border p-2 space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">New Hold Codes</span>
-                <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="h-3 w-3" /> None</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">New Denial Codes</span>
-                <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="h-3 w-3" /> None unexpected</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Pend Status Changes</span>
-                <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="h-3 w-3" /> Cleared</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Financial Inconsistencies</span>
-                <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="h-3 w-3" /> None</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Authorization Conflicts</span>
-                <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="h-3 w-3" /> None</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">System Validation Errors</span>
-                <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="h-3 w-3" /> None</span>
-              </div>
+          <div className="rounded border p-2 space-y-1.5 text-xs">
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">All Checks</span>
+              <span className="inline-flex items-center gap-1 text-green-400"><CheckCircle2 className="h-3 w-3" /> Passed</span>
             </div>
-          </div>
-          <div className="rounded px-2 py-1.5 text-[10px] font-semibold bg-green-500/10 border border-green-500/30 text-green-400">
-            Outcome: Claim Ready for Finalization
           </div>
         </div>
       ),
     },
   ]
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
+
+export function COBAdjudicationView({ claim }: COBAdjudicationViewProps) {
+  const [expandedStages, setExpandedStages] = React.useState<Set<number>>(new Set([1, 2, 3]))
+  const [stages, setStages] = React.useState<StageData[] | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    async function fetchAgentOutput() {
+      try {
+        setLoading(true)
+        setError(null)
+        const data: AgentOutput = await api.claims.getAgentOutput(claim.id)
+
+        if (cancelled) return
+
+        if (data && data.stages && data.stages.length > 0) {
+          setStages(buildStagesFromAPI(data.stages))
+        } else {
+          // No API data — fall back to local generation
+          setStages(buildStagesLocally(claim))
+        }
+      } catch (err: any) {
+        if (cancelled) return
+        // On error, fall back to local generation
+        console.warn('Failed to fetch agent output, using local fallback:', err.message)
+        setStages(buildStagesLocally(claim))
+        setError(null) // Don't show error since we have fallback
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    fetchAgentOutput()
+    return () => { cancelled = true }
+  }, [claim.id])
+
+  const toggleStage = (id: number) => {
+    setExpandedStages((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const expandAll = () => setExpandedStages(new Set([1, 2, 3, 4, 5, 6, 7, 8]))
+  const collapseAll = () => setExpandedStages(new Set())
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-sm text-muted-foreground">Loading adjudication data...</span>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <AlertTriangle className="h-5 w-5 text-amber-400" />
+        <span className="ml-2 text-sm text-muted-foreground">{error}</span>
+      </div>
+    )
+  }
+
+  if (!stages || stages.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Clock className="h-5 w-5 text-muted-foreground" />
+        <span className="ml-2 text-sm text-muted-foreground">Processing required — no adjudication data available yet.</span>
+      </div>
+    )
+  }
 
   return (
     <div className="max-h-[70vh] overflow-y-auto space-y-2 pr-1">
