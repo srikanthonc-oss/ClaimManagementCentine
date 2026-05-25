@@ -16,71 +16,73 @@ def seed():
     cur = conn.cursor()
 
     # ─── Hold_Code_Info → claim_hold_codes ────────────────────────────────────
+    # Note: 899929180 has 2 hold codes, 899929185 has History="H", 899929192 has AUTH
     hold_codes = [
-        ("899929180", 1, "No", "AUTH", "Authorization pending review"),
-        ("899929181", 1, "No", "AUTH", "Authorization pending review"),
-        ("899929182", 1, "No", "AUTH", "Authorization pending review"),
-        ("899929183", 1, "No", "TSSD", "Technical Shared Services processing hold"),
-        ("899929184", 1, "No", "TSSD", "Technical Shared Services processing hold"),
-        ("899929185", 1, "No", "TSSD", "Technical Shared Services processing hold"),
-        ("899929186", 1, "No", "COBOC", "Undefined other carrier code for COB"),
-        ("899929187", 1, "No", "AUTH", "Authorization pending review"),
-        ("899929188", 1, "No", "TSSD", "Technical Shared Services processing hold"),
-        ("899929189", 1, "No", "TSSD", "Technical Shared Services processing hold"),
-        ("899929190", 1, "No", "AUTH", "Authorization pending review"),
-        ("899929191", 1, "No", "COBOC", "Undefined other carrier code for COB"),
-        ("899929192", 1, "No", "AUTH", "Authorization pending review"),
-        ("899929193", 1, "No", "COBOC", "Undefined other carrier code for COB"),
-        ("899929194", 1, "No", "TSSD", "Technical Shared Services processing hold"),
-        ("899929195", 1, "No", "TSSD", "Technical Shared Services processing hold"),
-        ("899929196", 1, "No", "COBOC", "Undefined other carrier code for COB"),
-        ("899929197", 1, "No", "TSSD", "Technical Shared Services processing hold"),
-        ("899929198", 1, "No", "AUTH", "Authorization pending review"),
-        ("899929199", 1, "No", "TSSD", "Technical Shared Services processing hold"),
+        ("899929180", 1, "", "COBOC", "Authorization pending review"),
+        ("899929180", 1, "", "COBHD", "Authorization pending review"),
+        ("899929181", 1, "", "COBOC", "Authorization pending review"),
+        ("899929182", 1, "", "COBOC", "Authorization pending review"),
+        ("899929183", 1, "", "COBHD", "Technical Shared Services processing hold"),
+        ("899929184", 1, "", "COBOC", "Technical Shared Services processing hold"),
+        ("899929185", 1, "H", "COBOC", "Technical Shared Services processing hold"),
+        ("899929186", 1, "", "COBOC", "Undefined other carrier code for COB"),
+        ("899929187", 1, "", "COBHD", "Authorization pending review"),
+        ("899929188", 1, "", "TSSD", "Technical Shared Services processing hold"),
+        ("899929189", 1, "", "COBHD", "Technical Shared Services processing hold"),
+        ("899929190", 1, "", "COBOC", "Authorization pending review"),
+        ("899929191", 1, "", "COBOC", "Undefined other carrier code for COB"),
+        ("899929192", 1, "", "AUTH", "Authorization pending review"),
+        ("899929193", 1, "", "COBHD", "Undefined other carrier code for COB"),
+        ("899929194", 1, "", "COBOC", "Technical Shared Services processing hold"),
+        ("899929195", 1, "", "COBOC", "Technical Shared Services processing hold"),
+        ("899929196", 1, "", "COBOC", "Undefined other carrier code for COB"),
+        ("899929197", 1, "", "COBHD", "Technical Shared Services processing hold"),
+        ("899929198", 1, "", "COBOC", "Authorization pending review"),
+        ("899929199", 1, "", "COBOC", "Technical Shared Services processing hold"),
     ]
 
     print("Inserting Hold_Code_Info...")
     for claim_num, line_no, history, reason, desc in hold_codes:
         claim_id = get_claim_id(cur, claim_num)
         if claim_id:
-            cur.execute("DELETE FROM claim_hold_codes WHERE claim_id = %s", (claim_id,))
+            # Don't delete all — allow multiple hold codes per claim
             cur.execute(
                 "INSERT INTO claim_hold_codes (claim_id, line_no, hold_code, history, reason, description) VALUES (%s,%s,%s,%s,%s,%s)",
                 (claim_id, line_no, reason, history, reason, desc)
             )
 
-    # ─── Claim_Header → claim_header_detail ───────────────────────────────────
+    # ─── Claim_Header → claim_header_detail (now includes Received Date) ─────
     headers = [
-        ("899929180", "99020000", "RAD", "22", "Par"),
-        ("899929181", "99020001", "ENT", "22", "Non-Par"),
-        ("899929182", "99020002", "PNMAN", "22", "Non-Par"),
-        ("899929183", "99020003", "PNMAN", "22", "Par"),
-        ("899929184", "99020004", "PNMAN", "11", "Non-Par"),
-        ("899929185", "99020005", "PNMAN", "11", "Par"),
-        ("899929186", "99020006", "PNMAN", "22", "Par"),
-        ("899929187", "99020007", "URO", "19", "Non-Par"),
-        ("899929188", "99020008", "URO", "11", "Non-Par"),
-        ("899929189", "99020009", "RAD", "22", "Non-Par"),
-        ("899929190", "99020010", "RAD", "19", "Par"),
-        ("899929191", "99020011", "ENT", "11", "Par"),
-        ("899929192", "99020012", "DERM", "11", "Par"),
-        ("899929193", "99020013", "ORTHO", "19", "Par"),
-        ("899929194", "99020014", "DERM", "22", "Non-Par"),
-        ("899929195", "99020015", "CARD", "11", "Non-Par"),
-        ("899929196", "99020016", "RAD", "19", "Non-Par"),
-        ("899929197", "99020017", "DERM", "22", "Par"),
-        ("899929198", "99020018", "DERM", "22", "Par"),
-        ("899929199", "99020019", "CARD", "19", "Par"),
+        ("899929180", "99020000", "RAD", "22", "Par", "8/3/25"),
+        ("899929181", "99020001", "ENT", "22", "Non-Par", "7/28/25"),
+        ("899929182", "99020002", "PNMAN", "22", "Non-Par", "8/4/25"),
+        ("899929183", "99020003", "PNMAN", "22", "Par", "7/20/25"),
+        ("899929184", "99020004", "PNMAN", "11", "Non-Par", "8/8/25"),
+        ("899929185", "99020005", "PNMAN", "11", "Par", "7/15/25"),
+        ("899929186", "99020006", "PNMAN", "22", "Par", "7/25/25"),
+        ("899929187", "99020007", "URO", "19", "Non-Par", "7/25/25"),
+        ("899929188", "99020008", "URO", "11", "Non-Par", "7/30/25"),
+        ("899929189", "99020009", "RAD", "22", "Non-Par", "7/30/25"),
+        ("899929190", "99020010", "RAD", "19", "Par", "7/30/25"),
+        ("899929191", "99020011", "ENT", "11", "Par", "7/30/25"),
+        ("899929192", "99020012", "DERM", "11", "Par", "7/30/25"),
+        ("899929193", "99020013", "ORTHO", "19", "Par", "7/30/25"),
+        ("899929194", "99020014", "DERM", "22", "Non-Par", "7/30/25"),
+        ("899929195", "99020015", "CARD", "11", "Non-Par", "7/30/25"),
+        ("899929196", "99020016", "RAD", "19", "Non-Par", "7/30/25"),
+        ("899929197", "99020017", "DERM", "22", "Par", "7/30/25"),
+        ("899929198", "99020018", "DERM", "22", "Par", "7/30/25"),
+        ("899929199", "99020019", "CARD", "19", "Par", "7/30/25"),
     ]
 
-    print("Inserting Claim_Header...")
-    for claim_num, member_id, specialty, pos, par in headers:
+    print("Inserting Claim_Header (with Received Date)...")
+    for claim_num, member_id, specialty, pos, par, recv_date in headers:
         claim_id = get_claim_id(cur, claim_num)
         if claim_id:
             cur.execute("DELETE FROM claim_header_detail WHERE claim_id = %s", (claim_id,))
             cur.execute(
                 "INSERT INTO claim_header_detail (claim_id, member_id, specialty, place_of_service, par_status, received_date) VALUES (%s,%s,%s,%s,%s,%s)",
-                (claim_id, member_id, specialty, pos, par, "")
+                (claim_id, member_id, specialty, pos, par, recv_date)
             )
 
     # ─── Claim_Detail → claim_detail_lines ────────────────────────────────────
@@ -101,7 +103,7 @@ def seed():
         ("899929185", 2, "71046", "95", "06/11/2025", "06/05/2025", 3, 487.49, 368.20, 21.18, 63.55, 283.47),
         ("899929186", 1, "99214", "0", "06/07/2025", "06/14/2025", 2, 470.31, 319.20, 46.14, 53.13, 219.93),
         ("899929186", 2, "99214", "25", "06/10/2025", "06/15/2025", 2, 1379.75, 1172.58, 22.33, 169.19, 981.06),
-        ("899929187", 1, "36415", "25", "06/30/2025", "06/12/2025", 3, 1345.66, 959.88, 28.99, 119.65, 811.24),
+        ("899929187", 1, "36415", "25", "05/30/2025", "06/12/2025", 3, 1345.66, 959.88, 28.99, 119.65, 811.24),
         ("899929187", 2, "99215", "25", "06/16/2025", "06/27/2025", 4, 1402.36, 864.92, 32.62, 156.42, 675.88),
         ("899929188", 1, "80053", "0", "06/05/2025", "06/16/2025", 3, 1223.99, 833.60, 17.41, 131.32, 684.87),
         ("899929188", 2, "99213", "59", "06/18/2025", "06/21/2025", 4, 648.99, 400.16, 13.71, 62.73, 323.72),

@@ -45,6 +45,19 @@ def run_timely_filing_agent(claim: dict) -> dict:
     state = claim.get("state", "OH") or "OH"
     recv_dt = claim.get("recv_dt", "") or ""
 
+    # Get received_date from claim_header_detail (reference data) if available
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT received_date FROM claim_header_detail WHERE claim_id = %s", (claim_id,))
+        hdr_row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if hdr_row and hdr_row[0]:
+            recv_dt = hdr_row[0]
+    except Exception:
+        pass
+
     # Try Bedrock for enhanced reasoning
     bedrock_result = _try_bedrock(claim)
 

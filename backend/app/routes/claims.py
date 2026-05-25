@@ -207,7 +207,7 @@ async def upload_reference_data(req: ReferenceDataRequest, user=Depends(require_
         if cid:
             cur.execute("DELETE FROM claim_header_detail WHERE claim_id = %s", (cid,))
             cur.execute("INSERT INTO claim_header_detail (claim_id, member_id, specialty, place_of_service, par_status, received_date) VALUES (%s,%s,%s,%s,%s,%s)",
-                (cid, row.get("memberId") or row.get("Member Id") or "", row.get("specialty") or row.get("Speciality") or "", row.get("plcOfSvc") or row.get("Plc of Svc") or "", row.get("par") or row.get("Par") or "", row.get("receivedDate") or ""))
+                (cid, row.get("memberId") or row.get("Member Id") or "", row.get("specialty") or row.get("Speciality") or "", row.get("plcOfSvc") or row.get("Plc of Svc") or "", row.get("par") or row.get("Par") or "", row.get("receivedDate") or row.get("Received Date") or ""))
             inserted += 1
     counts["claimHeaders"] = inserted
 
