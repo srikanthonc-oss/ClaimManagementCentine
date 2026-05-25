@@ -293,15 +293,28 @@ export default function FileIntakePage() {
       const cobHistoryRaw = readSheet('COBHistory')
       const eobExtractionRaw = readSheet('COB_Image_Extraction')
 
+      // Helper to convert Excel serial number to date string
+      const excelDateToStr = (val: any): string => {
+        if (!val) return ''
+        if (typeof val === 'number') {
+          const date = new Date((val - 25569) * 86400 * 1000)
+          return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}/${date.getFullYear()}`
+        }
+        return String(val)
+      }
+
       // Map to API format
       const holdCodes = holdCodesRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), lineNo: r['Line#'] || 1, history: r['History'] || '', reason: r['Reason'] || '', description: r['Description'] || '' }))
-      const claimHeaders = claimHeadersRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), memberId: String(r['Member Id'] || ''), specialty: r['Speciality'] || '', plcOfSvc: String(r['Plc of Svc'] || ''), par: r['Par'] || '' }))
-      const claimDetails = claimDetailsRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, cpt: String(r['CPT'] || ''), mod: String(r['Mod'] || ''), startDate: r['Start Date'] || '', endDate: r['End Date'] || '', units: r['Units'] || 1, billedAmt: r['Billed Amt'] || 0, allowedAmt: r['Allowed Amt'] || 0, copay: r['Copay'] || 0, coins: r['Coins'] || 0, ocPaid: r['OC Paid'] || 0 }))
+      const claimHeaders = claimHeadersRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), memberId: String(r['Member Id'] || ''), specialty: r['Speciality'] || '', plcOfSvc: String(r['Plc of Svc'] || ''), par: r['Par'] || '', receivedDate: excelDateToStr(r['Received Date']) }))
+      const claimDetails = claimDetailsRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, cpt: String(r['CPT'] || ''), mod: String(r['Mod'] || ''), startDate: excelDateToStr(r['Start Date']), endDate: excelDateToStr(r['End Date']), units: r['Units'] || 1, billedAmt: r['Billed Amt'] || 0, allowedAmt: r['Allowed Amt'] || 0, copay: r['Copay'] || 0, coins: r['Coins'] || 0, ocPaid: r['OC Paid'] || 0 }))
       const denialDetails = denialDetailsRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), lineNo: r['Line#'] || 1, history: r['History'] || '', reasonCode: r['Rsn Code'] || '' }))
-      const cobHistory = cobHistoryRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, primaryInsurance: r['Primary Insurance'] || '', effectiveDate: r['Effective Date'] || '', termDate: r['Term Date'] || '' }))
+      const cobHistory = cobHistoryRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, primaryInsurance: r['Primary Insurance'] || '', effectiveDate: excelDateToStr(r['Effective Date']), termDate: excelDateToStr(r['Term Date']) }))
       const eobExtraction = eobExtractionRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, cpt: String(r['CPT'] || ''), insuranceName: r['Insurance Name'] || '', paidAmt: r['Paid Amt'] || 0, adjGrpCode: r['Adj Grp Code'] || '', reason: String(r['Rsn'] || ''), prAmount: r['PR amount'] || 0 }))
 
       const result = await api.claims.uploadReference({ holdCodes, claimHeaders, claimDetails, denialDetails, cobHistory, eobExtraction })
+      console.log('[RefUpload] Parsed counts:', { holdCodes: holdCodes.length, claimHeaders: claimHeaders.length, claimDetails: claimDetails.length, denialDetails: denialDetails.length, cobHistory: cobHistory.length, eobExtraction: eobExtraction.length })
+      console.log('[RefUpload] Sample holdCode:', holdCodes[0])
+      console.log('[RefUpload] Result:', result)
       setRefUploadStatus(`Reference data uploaded: ${JSON.stringify(result.counts)}`)
       setTimeout(() => setRefUploadStatus(null), 5000)
     } catch (err: any) {
