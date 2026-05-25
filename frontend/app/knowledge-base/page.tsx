@@ -4,6 +4,7 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import SemanticOntologyPage from '@/app/semantic-ontology/page'
 import {
   BookOpen,
   Shield,
@@ -11,8 +12,11 @@ import {
   Clock,
   FileText,
   Search,
+  Brain,
+  Network,
 } from 'lucide-react'
 
+type TopTab = 'knowledge-base' | 'semantic-ontology'
 type Tab = 'hold-codes' | 'denial-codes' | 'pr-co-rules' | 'state-filing' | 'cob-formulas' | 'business-rules'
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -119,6 +123,7 @@ const businessRules = [
 ]
 
 export default function KnowledgeBasePage() {
+  const [topTab, setTopTab] = React.useState<TopTab>('knowledge-base')
   const [activeTab, setActiveTab] = React.useState<Tab>('hold-codes')
   const [searchQuery, setSearchQuery] = React.useState('')
 
@@ -131,11 +136,48 @@ export default function KnowledgeBasePage() {
     <div className="space-y-4">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">Knowledge Base</h1>
+        <h1 className="text-2xl font-bold">Ontology</h1>
         <p className="text-xs text-muted-foreground">
-          Structured knowledge agents use for COB claim adjudication — hold codes, denial codes, formulas, and business rules
+          Knowledge base and semantic model powering the AI claims adjudication agents
         </p>
       </div>
+
+      {/* Top-level section switcher */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setTopTab('knowledge-base')}
+          className={cn(
+            'flex items-center gap-2 rounded-lg border px-4 py-2.5 text-xs font-medium transition-all',
+            topTab === 'knowledge-base'
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:bg-muted'
+          )}
+        >
+          <Brain className="h-4 w-4" />
+          Knowledge Base
+        </button>
+        <button
+          onClick={() => setTopTab('semantic-ontology')}
+          className={cn(
+            'flex items-center gap-2 rounded-lg border px-4 py-2.5 text-xs font-medium transition-all',
+            topTab === 'semantic-ontology'
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:bg-muted'
+          )}
+        >
+          <Network className="h-4 w-4" />
+          Semantic Ontology
+        </button>
+      </div>
+
+      {/* Semantic Ontology content */}
+      {topTab === 'semantic-ontology' && (
+        <SemanticOntologyPage />
+      )}
+
+      {/* Knowledge Base content */}
+      {topTab === 'knowledge-base' && (
+      <>
 
       {/* Search */}
       <div className="relative max-w-md">
@@ -176,6 +218,8 @@ export default function KnowledgeBasePage() {
         {activeTab === 'cob-formulas' && <COBFormulasTab />}
         {activeTab === 'business-rules' && <BusinessRulesTab filter={filterText} />}
       </div>
+      </>
+      )}
     </div>
   )
 }

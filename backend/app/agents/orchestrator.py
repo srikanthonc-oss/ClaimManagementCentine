@@ -65,18 +65,57 @@ def run_orchestrator(claim_id: str) -> dict:
     print(f"[Orchestrator] Running Stage 8: Post Validation for {claim['claim_number']}")
     results["stage_8"] = run_post_validation_agent(claim, results)
 
-    # Calculate overall confidence
+    # Calculate overall confidence with more nuanced scoring
+    # Use claim characteristics to adjust confidence
     confidences = []
     for key, val in results.items():
         if isinstance(val, dict):
             conf = val.get("confidence", "Medium")
+            outcome = val.get("outcome", "")
+
+            # Base score from confidence level
             if conf == "High":
-                confidences.append(95)
+                base = 95
             elif conf == "Medium":
-                confidences.append(75)
+                base = 75
             else:
-                confidences.append(50)
+                base = 50
+
+            # Reduce score if outcome indicates issues
+            if "Denied" in outcome or "DNNPR" in outcome or "DN0" in outcome:
+                base = min(base, 60)
+            elif "Human Review" in outcome or "Exception" in outcome:
+                base = min(base, 70)
+            elif "Already Processed" in outcome or "Duplicate" in outcome:
+                base = min(base, 65)
+
+            confidences.append(base)
+
     overall_confidence = round(sum(confidences) / len(confidences)) if confidences else 0
+
+    # Additional adjustments based on claim characteristics
+    days_aged = claim.get("days_aged", 0) or 0
+    billed = float(claim.get("billed_amount", 0) or 0)
+    hold_code = claim.get("hold_code", "") or ""
+
+    # High dollar claims get reduced confidence (need more scrutiny)
+    if billed > 50000:
+        overall_confidence = min(overall_confidence, 80)
+    elif billed > 20000:
+        overall_confidence = max(overall_confidence - 5, 60)
+
+    # Claims aged > 300 days get reduced confidence (timely filing risk)
+    if days_aged > 300:
+        overall_confidence = max(overall_confidence - 8, 55)
+    elif days_aged > 200:
+        overall_confidence = max(overall_confidence - 3, 65)
+
+    # Non-COB hold codes reduce confidence
+    if hold_code and not any(c in hold_code for c in ["COB", "cob"]):
+        overall_confidence = max(overall_confidence - 5, 60)
+
+    # Ensure within bounds
+    overall_confidence = max(50, min(99, overall_confidence))
 
     # Read threshold from DB for status determination
     conn = get_db()

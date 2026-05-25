@@ -62,12 +62,11 @@ export function Navigation() {
     { href: '/pend-processing', label: 'Claims Processing', icon: ClipboardList },
     // { href: '/cob', label: 'COB Pipeline', icon: GitBranch },
     { href: '/ai-functions', label: 'Agent Registry', icon: Bot },
-    { href: '/knowledge-base', label: 'Knowledge Base', icon: Layers },
-    { href: '/semantic-ontology', label: 'Semantic Ontology', icon: Layers },
+    { href: '/knowledge-base', label: 'Ontology', icon: Layers },
     // { href: '/data-ontology', label: 'Data Ontology', icon: Layers },
-    { href: '/help', label: 'Help & Training', icon: HelpCircle },
     ...(currentUser?.role === 'admin' ? [{ href: '/routing-thresholds', label: 'Routing Thresholds', icon: Sliders }] : []),
     ...(currentUser?.role === 'admin' ? [{ href: '/user-management', label: 'User Management', icon: Users }] : []),
+    { href: '/help', label: 'Help & Training', icon: HelpCircle },
   ]
 
   const isActive = (href: string) => {

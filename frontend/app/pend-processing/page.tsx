@@ -818,9 +818,9 @@ export default function PendProcessingPage() {
           canExecute={canExecute}
           onClose={() => setViewingClaim(null)}
           onApprove={(notes) => {
-            // Update locally
+            // Update locally — keep original confidence, just change status
             setClaims((prev) => prev.map((c) =>
-              c.id === viewingClaim.id ? { ...c, status: 'Approved' as Claim['status'], confidence: 100 } : c
+              c.id === viewingClaim.id ? { ...c, status: 'Approved' as Claim['status'] } : c
             ))
             // Store in backend DB
             api.claims.decide(viewingClaim.id, 'approve', null, notes).catch(() => {})
