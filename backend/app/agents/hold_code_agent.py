@@ -83,27 +83,37 @@ Hold codes: {', '.join(hold_codes)}
 Claim classification: {claim.get('classification')}
 Platform: {claim.get('platform')}
 Billed amount: ${claim.get('billed_amount', 0)}
-
+ 
 For each hold code, provide:
 - line_no (sequential starting at 1)
 - hold_code (the code)
 - history ("Y" if previously processed, "N" if new)
 - reason ("COB", "Duplicate", "Review", "Subrogation", etc.)
 - description (brief explanation)
-
-Then determine the outcome:
-- "Continue COB Review" if COBOC or COBHD present and no duplicates
-- "Already Processed" if all codes show history="Y"
-- "Duplicate Review Required" if EXDUC is present
-
-Return JSON:
-{{
-  "hold_codes": [...],
-  "outcome": "...",
-  "reasoning": "...",
-  "confidence": "High" or "Medium" or "Low"
-}}"""
-
+ 
+#AI Validation Summary
+ 
+Return in Json format:
+"confidence": "High" or "Medium" or "Low"
+Validation Rule
+Logic Applied
+Result
+Status
+ 
+Sample Example: 
+| **Hold Code Family** | Is COBOC or COBHD? | COBOC = COB processing code | ✓ **VALID** |
+| **Previously Processed** | Is History = "H"? | History is blank (not "H") | ✓ **FRESH CLAIM** |
+| **Duplicate Indicator** | Does denial contain EXDUC? | DNNPR ≠ EXDUC | ✓ **NO DUPLICATE** |
+ 
+ 
+# AI Reasoning
+ 
+Return in Json format:
+Why hold code qualifies for COB processing
+Business Rules Applied:
+ 
+"""
+ 
 
 def _try_bedrock_with_prompt(prompt: str) -> dict:
     """Try to use Bedrock with the given prompt."""

@@ -223,6 +223,9 @@ def init_db():
             executed_at TIMESTAMP DEFAULT NOW(),
             UNIQUE(claim_id, stage_number)
         );
+
+        -- Ensure prompt_text column exists (for existing tables)
+        ALTER TABLE agent_stage_outputs ADD COLUMN IF NOT EXISTS prompt_text TEXT;
     """)
     conn.commit()
     cur.close()
