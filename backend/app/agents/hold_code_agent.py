@@ -1,4 +1,4 @@
-"""Stage 2: Hold Code Validation Agent.
+"""Stage 2:     
 
 Reads the claim's hold_code field, extracts/generates hold code data,
 stores in claim_hold_codes table, and applies business logic.
@@ -36,7 +36,8 @@ def run_hold_code_agent(claim: dict) -> dict:
     hold_codes = [hc.strip() for hc in hold_code_str.split(",") if hc.strip()]
 
     # Try Bedrock for enhanced reasoning
-    bedrock_result = _try_bedrock(claim, hold_codes)
+    prompt_used = _build_prompt(claim, hold_codes)
+    bedrock_result = _try_bedrock_with_prompt(prompt_used)
 
     if bedrock_result:
         hold_code_entries = bedrock_result.get("hold_codes", [])
@@ -65,18 +66,18 @@ def run_hold_code_agent(claim: dict) -> dict:
     store_stage_output(
         claim_id, STAGE_NUMBER, STAGE_NAME, AGENT_NAME,
         {"hold_code": hold_code_str, "claim_number": claim_number},
-        output_data, outcome, confidence, reasoning
+        output_data, outcome, confidence, reasoning,
+        prompt_text=prompt_used
     )
 
     return output_data
 
 
-def _try_bedrock(claim: dict, hold_codes: list) -> dict:
-    """Try to use Bedrock for hold code analysis."""
+def _build_prompt(claim: dict, hold_codes: list) -> str:
+    """Build the prompt for hold code analysis."""
     if not hold_codes:
-        return None
-
-    prompt = f"""You are a healthcare claims COB (Coordination of Benefits) hold code analyst.
+        return ""
+    return f"""You are a healthcare claims COB (Coordination of Benefits) hold code analyst.
 Analyze these hold codes for claim {claim.get('claim_number')}:
 Hold codes: {', '.join(hold_codes)}
 Claim classification: {claim.get('classification')}
@@ -103,8 +104,19 @@ Return JSON:
   "confidence": "High" or "Medium" or "Low"
 }}"""
 
+
+def _try_bedrock_with_prompt(prompt: str) -> dict:
+    """Try to use Bedrock with the given prompt."""
+    if not prompt:
+        return None
     response = call_bedrock(prompt, max_tokens=1500)
     return parse_bedrock_json(response)
+
+
+def _try_bedrock(claim: dict, hold_codes: list) -> dict:
+    """Try to use Bedrock for hold code analysis (legacy wrapper)."""
+    prompt = _build_prompt(claim, hold_codes)
+    return _try_bedrock_with_prompt(prompt)
 
 
 def _deterministic_logic(claim: dict, hold_codes: list) -> tuple:

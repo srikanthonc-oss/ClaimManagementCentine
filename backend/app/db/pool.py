@@ -215,6 +215,7 @@ def init_db():
             stage_name VARCHAR(100) NOT NULL,
             agent_name VARCHAR(100) NOT NULL,
             input_data JSONB,
+            prompt_text TEXT,
             output_data JSONB NOT NULL,
             outcome VARCHAR(100),
             confidence VARCHAR(20),

@@ -30,17 +30,18 @@ def call_bedrock(prompt: str, max_tokens: int = 2000) -> str:
 
 
 def store_stage_output(claim_id: str, stage_number: int, stage_name: str, agent_name: str,
-                       input_data: dict, output_data: dict, outcome: str, confidence: str, reasoning: str):
+                       input_data: dict, output_data: dict, outcome: str, confidence: str, reasoning: str,
+                       prompt_text: str = None):
     """Store a stage output in the agent_stage_outputs table."""
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO agent_stage_outputs (claim_id, stage_number, stage_name, agent_name, input_data, output_data, outcome, confidence, reasoning)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO agent_stage_outputs (claim_id, stage_number, stage_name, agent_name, input_data, prompt_text, output_data, outcome, confidence, reasoning)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (claim_id, stage_number) DO UPDATE SET
-            output_data = %s, outcome = %s, confidence = %s, reasoning = %s, executed_at = NOW()
-    """, (claim_id, stage_number, stage_name, agent_name, json.dumps(input_data), json.dumps(output_data), outcome, confidence, reasoning,
-          json.dumps(output_data), outcome, confidence, reasoning))
+            input_data = %s, prompt_text = %s, output_data = %s, outcome = %s, confidence = %s, reasoning = %s, executed_at = NOW()
+    """, (claim_id, stage_number, stage_name, agent_name, json.dumps(input_data), prompt_text, json.dumps(output_data), outcome, confidence, reasoning,
+          json.dumps(input_data), prompt_text, json.dumps(output_data), outcome, confidence, reasoning))
     conn.commit()
     cur.close()
     conn.close()
