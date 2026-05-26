@@ -58,6 +58,8 @@ export const api = {
       request(`/api/claims/${id}/run-agents`, { method: 'POST' }),
     getAgentOutput: (id: string) =>
       request(`/api/claims/${id}/agent-output`),
+    getAgentStage: (id: string, stageNumber: number) =>
+      request(`/api/claims/${id}/agent-output/stage/${stageNumber}`),
     decide: (id: string, action: string, reason: string | null, notes: string) =>
       request(`/api/claims/${id}/decide`, { method: 'POST', body: JSON.stringify({ action, reason, notes }) }),
     clearAll: () => request('/api/claims', { method: 'DELETE' }),

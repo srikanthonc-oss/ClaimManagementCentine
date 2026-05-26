@@ -183,8 +183,8 @@ function StageSection({ stage, expanded, onToggle }: { stage: StageData; expande
 
 function mapOutcomeToStatus(outcome: string): OutcomeStatus {
   const lower = outcome.toLowerCase()
-  if (lower.includes('denied') || lower.includes('fail') || lower.includes('dnnpr') || lower.includes('dn0')) return 'fail'
-  if (lower.includes('human review') || lower.includes('duplicate') || lower.includes('warning')) return 'warning'
+  if (lower.includes('denied') || lower.includes('fail') || lower.includes('dnnpr') || lower.includes('dn0') || lower.includes('invalid')) return 'fail'
+  if (lower.includes('human review') || lower.includes('duplicate') || lower.includes('warning') || lower.includes('exception') || lower.includes('re-pend')) return 'warning'
   return 'pass'
 }
 
@@ -221,10 +221,37 @@ function renderStage1Content(data: any): React.ReactNode {
 }
 
 function renderStage2Content(data: any): React.ReactNode {
-  const holdCodes: any[] = data.hold_codes || []
+  // Support both new structure (hold_codes_detail) and legacy (hold_codes)
+  const holdCodes: any[] = data.hold_codes_detail || data.hold_codes || []
+  const validationSummary = data.validation_summary || {}
+  const validationRules: any[] = validationSummary.validation_rules || data.validation_rules || []
+  const aiReasoning = data.ai_reasoning || {}
+  const endResult = data.end_result || {}
+  const businessRules: string[] = aiReasoning.business_rules_applied || data.business_rules_applied || []
+  const claimAnalysis = data.claim_analysis || {}
+
+  // Determine outcome from new or old structure
+  const outcome = endResult.status || data.outcome || ''
+  const hasCobCode = holdCodes.some((hc: any) => (hc.hold_code || '').startsWith('COB'))
+  const hasDuplicate = holdCodes.some((hc: any) => hc.hold_code === 'EXDUC')
+
   return (
     <div className="space-y-3">
-      <p className="text-[10px] font-semibold text-muted-foreground">Source: Hold_Code_Info</p>
+      {/* Claim Analysis Header */}
+      {claimAnalysis.claim_id && (
+        <div className="rounded border p-2 space-y-1 text-[10px]">
+          <p className="font-semibold text-muted-foreground mb-1">Claim Analysis</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="flex justify-between"><span className="text-muted-foreground">Claim ID</span><span className="font-mono font-semibold">{claimAnalysis.claim_id}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Billed Amount</span><span className="font-mono font-semibold">{claimAnalysis.billed_amount}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Platform</span><span className="font-semibold">{claimAnalysis.platform}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Classification</span><span className="font-semibold">{claimAnalysis.claim_classification}</span></div>
+          </div>
+        </div>
+      )}
+
+      {/* Hold Codes Table */}
+      <p className="text-[10px] font-semibold text-muted-foreground">Hold Codes Detail</p>
       <div className="overflow-auto">
         <table className="w-full text-[10px] border">
           <thead>
@@ -249,21 +276,87 @@ function renderStage2Content(data: any): React.ReactNode {
           </tbody>
         </table>
       </div>
-      <div className="rounded border p-2 space-y-1 text-[10px]">
-        <p className="font-semibold text-muted-foreground mb-1">Analysis:</p>
-        <p className={cn(data.has_cob_code ? 'text-green-400' : 'text-red-400')}>
-          {data.has_cob_code ? '✓' : '✗'} COB hold code identified
-        </p>
-        <p className={cn(!data.has_duplicate ? 'text-green-400' : 'text-amber-400')}>
-          {!data.has_duplicate ? '✓' : '⚠'} {data.has_duplicate ? 'Duplicate indicator found' : 'No duplicate indicators'}
-        </p>
-      </div>
+
+      {/* Validation Rules */}
+      {validationRules.length > 0 && (
+        <div className="rounded border p-2 space-y-1.5 text-[10px]">
+          <p className="font-semibold text-muted-foreground mb-1">AI Validation Summary</p>
+          <div className="overflow-auto">
+            <table className="w-full text-[10px] border">
+              <thead>
+                <tr className="bg-muted/50">
+                  <th className="text-left px-2 py-1 border-r font-semibold">Rule</th>
+                  <th className="text-left px-2 py-1 border-r font-semibold">Logic Applied</th>
+                  <th className="text-left px-2 py-1 border-r font-semibold">Result</th>
+                  <th className="text-left px-2 py-1 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {validationRules.map((rule: any, i: number) => (
+                  <tr key={i} className="border-t">
+                    <td className="px-2 py-1 border-r font-semibold">{rule.rule}</td>
+                    <td className="px-2 py-1 border-r">{rule.logic_applied}</td>
+                    <td className="px-2 py-1 border-r">{rule.result}</td>
+                    <td className={cn('px-2 py-1 font-semibold', (rule.status || '').includes('✓') ? 'text-green-400' : 'text-red-400')}>{rule.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* AI Reasoning */}
+      {(aiReasoning.hold_code_qualification || businessRules.length > 0) && (
+        <div className="rounded border p-2 space-y-1.5 text-[10px]">
+          <p className="font-semibold text-muted-foreground mb-1">AI Reasoning</p>
+          {aiReasoning.hold_code_qualification && (
+            <p className="text-xs">{aiReasoning.hold_code_qualification}</p>
+          )}
+          {businessRules.length > 0 && (
+            <div className="mt-1.5 space-y-0.5">
+              <p className="font-semibold text-muted-foreground">Business Rules Applied:</p>
+              {businessRules.map((rule: string, i: number) => (
+                <p key={i} className="text-muted-foreground pl-2">{rule}</p>
+              ))}
+            </div>
+          )}
+          {aiReasoning.action_required && (
+            <p className="mt-1.5 font-semibold text-primary">{aiReasoning.action_required}</p>
+          )}
+        </div>
+      )}
+
+      {/* End Result / Next Steps */}
+      {endResult.next_steps && endResult.next_steps.length > 0 && (
+        <div className="rounded border p-2 space-y-1.5 text-[10px]">
+          <p className="font-semibold text-muted-foreground mb-1">Next Steps</p>
+          {endResult.next_steps.map((step: string, i: number) => (
+            <p key={i} className="text-muted-foreground">{step}</p>
+          ))}
+        </div>
+      )}
+
+      {/* Legacy analysis indicators (fallback) */}
+      {!validationRules.length && (
+        <div className="rounded border p-2 space-y-1 text-[10px]">
+          <p className="font-semibold text-muted-foreground mb-1">Analysis:</p>
+          <p className={cn(hasCobCode ? 'text-green-400' : 'text-red-400')}>
+            {hasCobCode ? '✓' : '✗'} COB hold code identified
+          </p>
+          <p className={cn(!hasDuplicate ? 'text-green-400' : 'text-amber-400')}>
+            {!hasDuplicate ? '✓' : '⚠'} {hasDuplicate ? 'Duplicate indicator found' : 'No duplicate indicators'}
+          </p>
+        </div>
+      )}
+
+      {/* Outcome Badge */}
       <div className={cn('rounded px-2 py-1.5 text-[10px] font-semibold',
-        mapOutcomeToStatus(data.outcome) === 'pass' ? 'bg-green-500/10 border border-green-500/30 text-green-400' :
-        mapOutcomeToStatus(data.outcome) === 'fail' ? 'bg-red-500/10 border border-red-500/30 text-red-400' :
+        mapOutcomeToStatus(outcome) === 'pass' ? 'bg-green-500/10 border border-green-500/30 text-green-400' :
+        mapOutcomeToStatus(outcome) === 'fail' ? 'bg-red-500/10 border border-red-500/30 text-red-400' :
         'bg-amber-500/10 border border-amber-500/30 text-amber-400'
       )}>
-        Outcome: {data.outcome}
+        {endResult.confidence_level ? `${outcome} — ${endResult.confidence_level}` : `Outcome: ${outcome}`}
       </div>
     </div>
   )
@@ -564,15 +657,26 @@ function renderStageContent(stageNumber: number, data: any): React.ReactNode {
 // ─── Build stages from API response ─────────────────────────────────────────
 
 function buildStagesFromAPI(apiStages: AgentStage[]): StageData[] {
-  return apiStages.map((stage) => ({
-    id: stage.stage_number,
-    title: stage.stage_name,
-    icon: STAGE_ICONS[stage.stage_number] || <Brain className="h-3.5 w-3.5 text-purple-400" />,
-    outcome: mapOutcomeToStatus(stage.outcome),
-    outcomeLabel: stage.outcome,
-    confidence: mapConfidence(stage.confidence),
-    content: renderStageContent(stage.stage_number, stage.output_data),
-  }))
+  return apiStages.map((stage) => {
+    // For stage 2, shorten the outcome label if it's the new verbose format
+    let outcomeLabel = stage.outcome
+    if (stage.stage_number === 2 && outcomeLabel.includes(' - ')) {
+      // e.g. "HOLD ACTIVE - COB PROCESSING REQUIRED" -> "COB Processing Required"
+      const parts = outcomeLabel.split(' - ')
+      outcomeLabel = parts.length > 1 ? parts[1] : parts[0]
+      outcomeLabel = outcomeLabel.split(' ').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')
+    }
+
+    return {
+      id: stage.stage_number,
+      title: stage.stage_name,
+      icon: STAGE_ICONS[stage.stage_number] || <Brain className="h-3.5 w-3.5 text-purple-400" />,
+      outcome: mapOutcomeToStatus(stage.outcome),
+      outcomeLabel: outcomeLabel,
+      confidence: mapConfidence(stage.confidence),
+      content: renderStageContent(stage.stage_number, stage.output_data),
+    }
+  })
 }
 
 // ─── Fallback: Build stages from local data (for unprocessed claims) ─────────
@@ -819,39 +923,82 @@ function buildStagesLocally(claim: Claim): StageData[] {
 
 export function COBAdjudicationView({ claim }: COBAdjudicationViewProps) {
   const [expandedStages, setExpandedStages] = React.useState<Set<number>>(new Set([1, 2, 3]))
-  const [stages, setStages] = React.useState<StageData[] | null>(null)
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<string | null>(null)
+  // Each stage loads independently: null = not started, 'loading' = in flight, StageData = done
+  const [stageMap, setStageMap] = React.useState<Record<number, StageData | 'loading' | null>>({})
+  const [loadedCount, setLoadedCount] = React.useState(0)
+  const [usedFallback, setUsedFallback] = React.useState(false)
 
   React.useEffect(() => {
     let cancelled = false
 
-    async function fetchAgentOutput() {
-      try {
-        setLoading(true)
-        setError(null)
-        const data: AgentOutput = await api.claims.getAgentOutput(claim.id)
+    async function fetchAllStages() {
+      // Mark all 8 stages as loading immediately so UI shows skeletons right away
+      const initialMap: Record<number, 'loading'> = {}
+      for (let i = 1; i <= 8; i++) initialMap[i] = 'loading'
+      setStageMap(initialMap)
 
+      try {
+        // Single API call — fetch all stages at once (fastest)
+        const data: AgentOutput = await api.claims.getAgentOutput(claim.id)
         if (cancelled) return
 
         if (data && data.stages && data.stages.length > 0) {
-          setStages(buildStagesFromAPI(data.stages))
+          // Render stages progressively with a tiny stagger so user sees them appear
+          data.stages.forEach((stage, idx) => {
+            setTimeout(() => {
+              if (cancelled) return
+              const built: StageData = {
+                id: stage.stage_number,
+                title: stage.stage_name,
+                icon: STAGE_ICONS[stage.stage_number] || <Brain className="h-3.5 w-3.5 text-purple-400" />,
+                outcome: mapOutcomeToStatus(stage.outcome),
+                outcomeLabel: (() => {
+                  let label = stage.outcome
+                  if (stage.stage_number === 2 && label.includes(' - ')) {
+                    const parts = label.split(' - ')
+                    label = parts.length > 1 ? parts[1] : parts[0]
+                    label = label.split(' ').map((w: string) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')
+                  }
+                  return label
+                })(),
+                confidence: mapConfidence(stage.confidence),
+                content: renderStageContent(stage.stage_number, stage.output_data),
+              }
+              setStageMap((prev) => ({ ...prev, [stage.stage_number]: built }))
+              setLoadedCount((prev) => prev + 1)
+            }, idx * 80) // 80ms stagger between each stage appearing
+          })
+
+          // Mark any stages not returned as null
+          const returnedNums = new Set(data.stages.map((s) => s.stage_number))
+          for (let i = 1; i <= 8; i++) {
+            if (!returnedNums.has(i)) {
+              setStageMap((prev) => ({ ...prev, [i]: null }))
+            }
+          }
         } else {
-          // No API data — fall back to local generation
-          setStages(buildStagesLocally(claim))
+          // No DB data — use local fallback
+          if (!cancelled) {
+            setUsedFallback(true)
+            const localStages = buildStagesLocally(claim)
+            const fallbackMap: Record<number, StageData> = {}
+            localStages.forEach((s) => { fallbackMap[s.id] = s })
+            setStageMap(fallbackMap)
+          }
         }
-      } catch (err: any) {
-        if (cancelled) return
-        // On error, fall back to local generation
-        console.warn('Failed to fetch agent output, using local fallback:', err.message)
-        setStages(buildStagesLocally(claim))
-        setError(null) // Don't show error since we have fallback
-      } finally {
-        if (!cancelled) setLoading(false)
+      } catch {
+        if (!cancelled) {
+          // On error, fall back to local generation
+          setUsedFallback(true)
+          const localStages = buildStagesLocally(claim)
+          const fallbackMap: Record<number, StageData> = {}
+          localStages.forEach((s) => { fallbackMap[s.id] = s })
+          setStageMap(fallbackMap)
+        }
       }
     }
 
-    fetchAgentOutput()
+    fetchAllStages()
     return () => { cancelled = true }
   }, [claim.id])
 
@@ -867,65 +1014,66 @@ export function COBAdjudicationView({ claim }: COBAdjudicationViewProps) {
   const expandAll = () => setExpandedStages(new Set([1, 2, 3, 4, 5, 6, 7, 8]))
   const collapseAll = () => setExpandedStages(new Set())
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        <span className="ml-2 text-sm text-muted-foreground">Loading adjudication data...</span>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <AlertTriangle className="h-5 w-5 text-amber-400" />
-        <span className="ml-2 text-sm text-muted-foreground">{error}</span>
-      </div>
-    )
-  }
-
-  if (!stages || stages.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Clock className="h-5 w-5 text-muted-foreground" />
-        <span className="ml-2 text-sm text-muted-foreground">Processing required — no adjudication data available yet.</span>
-      </div>
-    )
-  }
+  // Count how many stages are actually loaded (not loading, not null)
+  const loadedStages = Object.values(stageMap).filter((v) => v !== null && v !== 'loading') as StageData[]
+  const totalLoading = Object.values(stageMap).filter((v) => v === 'loading').length
 
   return (
     <div className="max-h-[70vh] overflow-y-auto space-y-2 pr-1">
-      {/* Expand/Collapse Controls */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-semibold text-muted-foreground">
-          COB Adjudication — {stages.length} Stages
+          COB Adjudication — {loadedStages.length} of 8 stages loaded
+          {totalLoading > 0 && <span className="ml-2 text-cyan-400 animate-pulse">({totalLoading} loading...)</span>}
         </p>
         <div className="flex gap-2">
-          <button
-            onClick={expandAll}
-            className="text-[10px] px-2 py-1 rounded border hover:bg-muted/50 transition-colors"
-          >
-            Expand All
-          </button>
-          <button
-            onClick={collapseAll}
-            className="text-[10px] px-2 py-1 rounded border hover:bg-muted/50 transition-colors"
-          >
-            Collapse All
-          </button>
+          <button onClick={expandAll} className="text-[10px] px-2 py-1 rounded border hover:bg-muted/50 transition-colors">Expand All</button>
+          <button onClick={collapseAll} className="text-[10px] px-2 py-1 rounded border hover:bg-muted/50 transition-colors">Collapse All</button>
         </div>
       </div>
 
-      {/* Stage Sections */}
-      {stages.map((stage) => (
-        <StageSection
-          key={stage.id}
-          stage={stage}
-          expanded={expandedStages.has(stage.id)}
-          onToggle={() => toggleStage(stage.id)}
-        />
-      ))}
+      {/* Render all 8 stage slots */}
+      {[1, 2, 3, 4, 5, 6, 7, 8].map((stageNum) => {
+        const stageEntry = stageMap[stageNum]
+
+        // Loading skeleton
+        if (stageEntry === 'loading' || stageEntry === undefined) {
+          return (
+            <div key={stageNum} className="rounded-lg border bg-card animate-pulse">
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className="h-3.5 w-3.5 rounded-full bg-muted" />
+                <div className="h-4 w-5 rounded-full bg-muted" />
+                <div className="h-3.5 w-3.5 rounded bg-muted" />
+                <div className="h-3 w-48 rounded bg-muted flex-1" />
+                <div className="h-4 w-20 rounded-full bg-muted" />
+                <div className="h-4 w-16 rounded-full bg-muted" />
+              </div>
+            </div>
+          )
+        }
+
+        // Not available (stage not run yet)
+        if (stageEntry === null) {
+          return (
+            <div key={stageNum} className="rounded-lg border bg-card opacity-40">
+              <div className="flex items-center gap-3 px-4 py-3">
+                <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-muted text-muted-foreground text-[10px] font-bold shrink-0">{stageNum}</span>
+                <span className="text-xs text-muted-foreground">Stage {stageNum} — not yet executed</span>
+              </div>
+            </div>
+          )
+        }
+
+        // Loaded stage
+        return (
+          <StageSection
+            key={stageNum}
+            stage={stageEntry}
+            expanded={expandedStages.has(stageNum)}
+            onToggle={() => toggleStage(stageNum)}
+          />
+        )
+      })}
     </div>
   )
 }

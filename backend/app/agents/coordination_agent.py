@@ -34,7 +34,8 @@ def run_coordination_agent(claim: dict) -> dict:
     detail_lines = _fetch_or_generate_detail_lines(claim)
 
     # Try Bedrock for enhanced reasoning
-    bedrock_result = _try_bedrock(claim, eob_data, detail_lines)
+    prompt_used = _build_prompt(claim, eob_data, detail_lines)
+    bedrock_result = _try_bedrock_with_prompt(prompt_used)
 
     if bedrock_result:
         outcome = bedrock_result.get("outcome", "Pay as Primary")
@@ -66,7 +67,8 @@ def run_coordination_agent(claim: dict) -> dict:
     store_stage_output(
         claim_id, STAGE_NUMBER, STAGE_NAME, AGENT_NAME,
         {"claim_number": claim_number, "eob_count": len(eob_data), "detail_lines": len(detail_lines)},
-        output_data, outcome, confidence, reasoning
+        output_data, outcome, confidence, reasoning,
+        prompt_text=prompt_used
     )
 
     return output_data
@@ -212,9 +214,9 @@ def _store_detail_lines(claim_id: str, lines: list):
     conn.close()
 
 
-def _try_bedrock(claim: dict, eob_data: list, detail_lines: list) -> dict:
-    """Try to use Bedrock for coordination analysis."""
-    prompt = f"""You are a healthcare COB coordination rule analyst.
+def _build_prompt(claim: dict, eob_data: list, detail_lines: list) -> str:
+    """Build the prompt for coordination analysis."""
+    return f"""You are a healthcare COB coordination rule analyst.
 Analyze the coordination of benefits for:
 Claim: {claim.get('claim_number')}
 Billed: ${claim.get('billed_amount', 0)}
@@ -245,8 +247,19 @@ Return JSON:
   "confidence": "High" or "Medium" or "Low"
 }}"""
 
+
+def _try_bedrock_with_prompt(prompt: str) -> dict:
+    """Try to use Bedrock with the given prompt."""
+    if not prompt:
+        return None
     response = call_bedrock(prompt, max_tokens=1500)
     return parse_bedrock_json(response)
+
+
+def _try_bedrock(claim: dict, eob_data: list, detail_lines: list) -> dict:
+    """Try to use Bedrock for coordination analysis (legacy wrapper)."""
+    prompt = _build_prompt(claim, eob_data, detail_lines)
+    return _try_bedrock_with_prompt(prompt)
 
 
 def _deterministic_logic(claim: dict, eob_data: list, detail_lines: list) -> tuple:

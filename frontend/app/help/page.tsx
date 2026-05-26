@@ -277,10 +277,10 @@ export default function HelpPage() {
         <p className="text-xs text-muted-foreground">Learn how PendResolve AI works, explore guides, and ask the assistant</p>
       </div>
 
-      {/* Main Layout: Content + Chat */}
+      {/* Main Layout: Chat + Content */}
       <div className="grid gap-5 grid-cols-1 lg:grid-cols-5">
-        {/* Left: Guides + FAQ + What's New (3 cols) */}
-        <div className="lg:col-span-3 space-y-5">
+        {/* Left: Guides + FAQ + What's New (3 cols) — displayed on right */}
+        <div className="lg:col-span-3 space-y-5 order-2 lg:order-2">
           {/* Tab switcher */}
           <div className="flex items-center gap-1 border-b">
             <button
@@ -396,8 +396,8 @@ export default function HelpPage() {
           )}
         </div>
 
-        {/* Right: Chat Bot (2 cols) */}
-        <div className="lg:col-span-2">
+        {/* Right: Chat Bot (2 cols) — displayed on left */}
+        <div className="lg:col-span-2 order-1 lg:order-1">
           <Card className="sticky top-6">
             <CardContent className="p-0 flex flex-col h-[600px]">
               {/* Chat Header */}

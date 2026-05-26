@@ -59,7 +59,8 @@ def run_timely_filing_agent(claim: dict) -> dict:
         pass
 
     # Try Bedrock for enhanced reasoning
-    bedrock_result = _try_bedrock(claim)
+    prompt_used = _build_prompt(claim)
+    bedrock_result = _try_bedrock_with_prompt(prompt_used)
 
     if bedrock_result:
         header_detail = bedrock_result.get("header_detail", {})
@@ -93,15 +94,16 @@ def run_timely_filing_agent(claim: dict) -> dict:
     store_stage_output(
         claim_id, STAGE_NUMBER, STAGE_NAME, AGENT_NAME,
         {"days_aged": days_aged, "state": state, "recv_dt": recv_dt},
-        output_data, outcome, confidence, reasoning
+        output_data, outcome, confidence, reasoning,
+        prompt_text=prompt_used
     )
 
     return output_data
 
 
-def _try_bedrock(claim: dict) -> dict:
-    """Try to use Bedrock for timely filing analysis."""
-    prompt = f"""You are a healthcare claims timely filing analyst.
+def _build_prompt(claim: dict) -> str:
+    """Build the prompt for timely filing analysis."""
+    return f"""You are a healthcare claims timely filing analyst.
 Analyze timely filing for:
 Claim: {claim.get('claim_number')}
 Days aged: {claim.get('days_aged', 0)}
@@ -129,8 +131,19 @@ Return JSON:
   "confidence": "High" or "Medium" or "Low"
 }}"""
 
+
+def _try_bedrock_with_prompt(prompt: str) -> dict:
+    """Try to use Bedrock with the given prompt."""
+    if not prompt:
+        return None
     response = call_bedrock(prompt, max_tokens=1000)
     return parse_bedrock_json(response)
+
+
+def _try_bedrock(claim: dict) -> dict:
+    """Try to use Bedrock for timely filing analysis (legacy wrapper)."""
+    prompt = _build_prompt(claim)
+    return _try_bedrock_with_prompt(prompt)
 
 
 def _deterministic_logic(claim: dict) -> tuple:

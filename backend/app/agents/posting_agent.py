@@ -35,7 +35,8 @@ def run_posting_agent(claim: dict, prior_results: dict) -> dict:
     stage_6 = prior_results.get("stage_6", {})
 
     # Try Bedrock for enhanced posting logic
-    bedrock_result = _try_bedrock(claim, prior_results)
+    prompt_used = _build_prompt(claim, prior_results)
+    bedrock_result = _try_bedrock_with_prompt(prompt_used)
 
     if bedrock_result:
         outcome = bedrock_result.get("outcome", "Ready for Posting")
@@ -74,14 +75,15 @@ def run_posting_agent(claim: dict, prior_results: dict) -> dict:
             "coordination": stage_5.get("outcome", ""),
             "calculation": stage_6.get("outcome", ""),
         }},
-        output_data, outcome, confidence, reasoning
+        output_data, outcome, confidence, reasoning,
+        prompt_text=prompt_used
     )
 
     return output_data
 
 
-def _try_bedrock(claim: dict, prior_results: dict) -> dict:
-    """Try to use Bedrock for posting recommendation."""
+def _build_prompt(claim: dict, prior_results: dict) -> str:
+    """Build the prompt for posting recommendation."""
     # Summarize prior results for the prompt
     summary = {}
     for key, val in prior_results.items():
@@ -91,7 +93,7 @@ def _try_bedrock(claim: dict, prior_results: dict) -> dict:
                 "confidence": val.get("confidence", ""),
             }
 
-    prompt = f"""You are a healthcare claims posting specialist.
+    return f"""You are a healthcare claims posting specialist.
 Generate posting recommendation for claim {claim.get('claim_number')}:
 Billed: ${claim.get('billed_amount', 0)}
 Classification: {claim.get('classification')}
@@ -123,8 +125,19 @@ Return JSON:
   "confidence": "High" or "Medium" or "Low"
 }}"""
 
+
+def _try_bedrock_with_prompt(prompt: str) -> dict:
+    """Try to use Bedrock with the given prompt."""
+    if not prompt:
+        return None
     response = call_bedrock(prompt, max_tokens=1500)
     return parse_bedrock_json(response)
+
+
+def _try_bedrock(claim: dict, prior_results: dict) -> dict:
+    """Try to use Bedrock for posting recommendation (legacy wrapper)."""
+    prompt = _build_prompt(claim, prior_results)
+    return _try_bedrock_with_prompt(prompt)
 
 
 def _deterministic_logic(claim: dict, stage_2: dict, stage_3: dict, stage_4: dict, stage_5: dict, stage_6: dict) -> tuple:

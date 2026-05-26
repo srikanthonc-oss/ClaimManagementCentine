@@ -385,19 +385,37 @@ export default function PendProcessingPage() {
       return
     }
 
-    for (const claim of claimsToProcess) {
-      try {
-        const result = await api.claims.runAgents(claim.id)
-        const confidence = result.confidence || 0
-        const status = result.status === 'InReview' ? 'In Review' : result.status
-        setClaims((prev) => prev.map((c) =>
-          c.id === claim.id ? { ...c, confidence, status: status as Claim['status'] } : c
-        ))
-        setProcessedIds((prev) => new Set([...prev, claim.id]))
-      } catch (err) {
-        console.error('[RunAgents] Error:', err)
-      }
+    // Immediately mark all claims as "Processing" in UI
+    setClaims((prev) => prev.map((c) =>
+      claimsToProcess.some((cp) => cp.id === c.id) ? { ...c, status: 'Processing' as Claim['status'] } : c
+    ))
+
+    // Process claims in parallel (batch of 3 at a time to avoid overwhelming Bedrock)
+    const BATCH_SIZE = 3
+    for (let i = 0; i < claimsToProcess.length; i += BATCH_SIZE) {
+      const batch = claimsToProcess.slice(i, i + BATCH_SIZE)
+      const results = await Promise.allSettled(
+        batch.map((claim) => api.claims.runAgents(claim.id))
+      )
+
+      results.forEach((result, idx) => {
+        const claim = batch[idx]
+        if (result.status === 'fulfilled') {
+          const confidence = result.value.confidence || 0
+          const status = result.value.status === 'InReview' ? 'In Review' : result.value.status
+          setClaims((prev) => prev.map((c) =>
+            c.id === claim.id ? { ...c, confidence, status: status as Claim['status'] } : c
+          ))
+          setProcessedIds((prev) => new Set([...prev, claim.id]))
+        } else {
+          console.error('[RunAgents] Error for claim:', claim.id, result.reason)
+          setClaims((prev) => prev.map((c) =>
+            c.id === claim.id ? { ...c, status: 'Pending' as Claim['status'] } : c
+          ))
+        }
+      })
     }
+
     setIsProcessing(false)
     setSelectedClaimIds(new Set())
   }
@@ -698,7 +716,7 @@ export default function PendProcessingPage() {
             </thead>
             <tbody>
               {filteredClaims.slice(0, 100).map((claim) => {
-                const processed = isClaimProcessed(claim.id)
+                const processed = isClaimProcessed(claim.id) || claim.status === 'Processing'
                 return (
                   <tr key={claim.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                     <td className="text-center px-2 py-2.5 w-8">
@@ -742,6 +760,8 @@ export default function PendProcessingPage() {
                             ? 'bg-green-500/20 text-green-400'
                             : claim.status === 'Denied'
                             ? 'bg-red-500/20 text-red-400'
+                            : claim.status === 'Processing'
+                            ? 'bg-cyan-500/20 text-cyan-400 animate-pulse'
                             : claim.status === 'Pending'
                             ? 'bg-purple-500/20 text-purple-400'
                             : claim.status === 'Approved' && claim.confidence < autoResolveThreshold
@@ -751,6 +771,7 @@ export default function PendProcessingPage() {
                           {claim.confidence >= autoResolveThreshold && claim.status === 'Approved' ? 'Auto-Resolved'
                             : claim.status === 'Approved' && claim.confidence < autoResolveThreshold ? 'Manual-Resolved'
                             : claim.status === 'Denied' ? 'Denied'
+                            : claim.status === 'Processing' ? 'Processing...'
                             : claim.status === 'Pending' ? 'Manual Processing'
                             : 'Pending Review'}
                         </span>
@@ -760,7 +781,7 @@ export default function PendProcessingPage() {
                     </td>
                     {hasProcessedClaims && (
                     <td className="px-3 py-2.5 text-center">
-                      {processed ? (
+                      {processed && claim.status !== 'Processing' ? (
                         <span className={cn(
                           'font-medium',
                           claim.confidence >= autoResolveThreshold ? 'text-green-400' :
@@ -768,6 +789,8 @@ export default function PendProcessingPage() {
                         )}>
                           {claim.confidence}%
                         </span>
+                      ) : claim.status === 'Processing' ? (
+                        <span className="text-muted-foreground animate-pulse">...</span>
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}

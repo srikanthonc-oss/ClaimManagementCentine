@@ -19,7 +19,8 @@ def run_post_validation_agent(claim: dict, prior_results: dict) -> dict:
     billed_amount = float(claim.get("billed_amount", 0) or 0)
 
     # Try Bedrock for enhanced validation
-    bedrock_result = _try_bedrock(claim, prior_results)
+    prompt_used = _build_prompt(claim, prior_results)
+    bedrock_result = _try_bedrock_with_prompt(prompt_used)
 
     if bedrock_result:
         outcome = bedrock_result.get("outcome", "Claim Ready for Finalization")
@@ -50,14 +51,15 @@ def run_post_validation_agent(claim: dict, prior_results: dict) -> dict:
     store_stage_output(
         claim_id, STAGE_NUMBER, STAGE_NAME, AGENT_NAME,
         {"claim_number": claim_number, "stages_completed": len(prior_results)},
-        output_data, outcome, confidence, reasoning
+        output_data, outcome, confidence, reasoning,
+        prompt_text=prompt_used
     )
 
     return output_data
 
 
-def _try_bedrock(claim: dict, prior_results: dict) -> dict:
-    """Try to use Bedrock for post-validation analysis."""
+def _build_prompt(claim: dict, prior_results: dict) -> str:
+    """Build the prompt for post-validation analysis."""
     # Build summary of all stages
     stage_summary = {}
     for key, val in prior_results.items():
@@ -68,7 +70,7 @@ def _try_bedrock(claim: dict, prior_results: dict) -> dict:
                 "reasoning": val.get("reasoning", "")[:100],
             }
 
-    prompt = f"""You are a healthcare claims quality assurance validator.
+    return f"""You are a healthcare claims quality assurance validator.
 Validate all stage results for claim {claim.get('claim_number')}:
 Billed: ${claim.get('billed_amount', 0)}
 Classification: {claim.get('classification')}
@@ -102,8 +104,19 @@ Return JSON:
   "confidence": "High" or "Medium" or "Low"
 }}"""
 
+
+def _try_bedrock_with_prompt(prompt: str) -> dict:
+    """Try to use Bedrock with the given prompt."""
+    if not prompt:
+        return None
     response = call_bedrock(prompt, max_tokens=2000)
     return parse_bedrock_json(response)
+
+
+def _try_bedrock(claim: dict, prior_results: dict) -> dict:
+    """Try to use Bedrock for post-validation analysis (legacy wrapper)."""
+    prompt = _build_prompt(claim, prior_results)
+    return _try_bedrock_with_prompt(prompt)
 
 
 def _deterministic_validation(claim: dict, prior_results: dict) -> tuple:

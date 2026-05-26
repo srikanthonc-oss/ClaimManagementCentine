@@ -342,6 +342,35 @@ async def get_agent_output(claim_id: str, user=Depends(get_current_user)):
     }
 
 
+@router.get("/{claim_id}/agent-output/stage/{stage_number}")
+async def get_agent_stage_output(claim_id: str, stage_number: int, user=Depends(get_current_user)):
+    """Get a single stage output for a claim — used for lazy loading in the view popup."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT stage_number, stage_name, agent_name, output_data, outcome, confidence, reasoning, executed_at
+        FROM agent_stage_outputs WHERE claim_id = %s AND stage_number = %s
+    """, (claim_id, stage_number))
+    cols = [desc[0] for desc in cur.description]
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Stage {stage_number} not found for claim {claim_id}")
+
+    def serialize(obj):
+        if isinstance(obj, list):
+            return [serialize(item) for item in obj]
+        if isinstance(obj, dict):
+            return {k: str(v) if hasattr(v, 'hex') or hasattr(v, 'isoformat') else (float(v) if hasattr(v, 'as_integer_ratio') else v) for k, v in obj.items()}
+        return obj
+
+    return serialize(dict(zip(cols, row)))
+
+
 @router.post("/{claim_id}/process")
 async def process_claim(claim_id: str, req: ProcessRequest, user=Depends(require_role("admin", "examiner"))):
     """Store agent processing result for a claim and update its status/confidence."""

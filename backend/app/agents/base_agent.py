@@ -1,17 +1,41 @@
 """Base agent class with Bedrock integration and fallback."""
 import json
 import os
+import time
 import boto3
+from botocore.config import Config
 from app.db.pool import get_db
 
-BEDROCK_MODEL = os.getenv("BEDROCK_SONNET_MODEL", "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+BEDROCK_MODEL = os.getenv("BEDROCK_MODEL", "anthropic.claude-3-haiku-20240307-v1:0")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+# Set SKIP_BEDROCK=true to use deterministic fallback only (fast mode for demos)
+SKIP_BEDROCK = os.getenv("SKIP_BEDROCK", "false").lower() in ("true", "1", "yes")
+
+# Reuse a single Bedrock client (avoid creating one per call)
+_bedrock_client = None
+_BEDROCK_TIMEOUT = 10  # seconds - fail fast and use deterministic fallback
+
+
+def _get_bedrock_client():
+    """Get or create a reusable Bedrock runtime client with timeout config."""
+    global _bedrock_client
+    if _bedrock_client is None:
+        config = Config(
+            read_timeout=_BEDROCK_TIMEOUT,
+            connect_timeout=5,
+            retries={'max_attempts': 1}
+        )
+        _bedrock_client = boto3.client("bedrock-runtime", region_name=AWS_REGION, config=config)
+    return _bedrock_client
 
 
 def call_bedrock(prompt: str, max_tokens: int = 2000) -> str:
     """Call Bedrock Claude and return the response text. Returns None on failure."""
+    if SKIP_BEDROCK:
+        return None
+    start = time.time()
     try:
-        client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        client = _get_bedrock_client()
         response = client.invoke_model(
             modelId=BEDROCK_MODEL,
             contentType="application/json",
@@ -23,9 +47,12 @@ def call_bedrock(prompt: str, max_tokens: int = 2000) -> str:
             })
         )
         result = json.loads(response["body"].read())
+        elapsed = time.time() - start
+        print(f"[Bedrock] Response in {elapsed:.1f}s")
         return result["content"][0]["text"]
     except Exception as e:
-        print(f"[Bedrock] Error: {e}")
+        elapsed = time.time() - start
+        print(f"[Bedrock] Error after {elapsed:.1f}s: {e}")
         return None
 
 

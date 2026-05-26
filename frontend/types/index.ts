@@ -9,7 +9,7 @@ export type Classification =
   | 'Corrected Claims'
   | 'High Dollar'
   | 'Other Pend'
-export type ClaimStatus = 'Pending' | 'Approved' | 'Denied' | 'In Review'
+export type ClaimStatus = 'Pending' | 'Processing' | 'Approved' | 'Denied' | 'In Review'
 export type DataSourceType = 'Claims API' | 'EDI Gateway' | 'File Upload' | 'FHIR API' | 'SFTP Feed'
 
 // Data Models

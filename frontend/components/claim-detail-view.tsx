@@ -29,14 +29,17 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
   const [denialReason, setDenialReason] = React.useState('')
   const [pendBackReason, setPendBackReason] = React.useState('')
   const [freshData, setFreshData] = React.useState<any>(null)
-  const [loading, setLoading] = React.useState(true)
+  const [loading, setLoading] = React.useState(false)
 
-  // Fetch fresh claim data from API on mount
+  // Fetch examiner decision data from API (non-blocking — popup renders immediately)
   React.useEffect(() => {
+    let cancelled = false
+    setLoading(true)
     api.claims.get(claim.id)
-      .then((data) => setFreshData(data))
+      .then((data) => { if (!cancelled) setFreshData(data) })
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [claim.id])
 
   // Use fresh API data for agent result and examiner decision if available
@@ -87,6 +90,16 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
           <div className="flex items-center gap-2 mb-4">
             <FileText className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-bold">Claim {claim.claimNumber}</h2>
+            {claim.confidence > 0 && (
+              <span className={cn(
+                'ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold',
+                claim.confidence >= 92 ? 'bg-green-500/15 text-green-400' :
+                claim.confidence >= 80 ? 'bg-amber-500/15 text-amber-400' :
+                'bg-red-500/15 text-red-400'
+              )}>
+                AI Confidence: {claim.confidence}%
+              </span>
+            )}
           </div>
 
           {/* Claim Info Grid */}
@@ -300,7 +313,16 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
             </div>
 
             {/* Examiner Decision Details */}
-            {displayDecision && (
+            {loading && (
+              <div className="mt-3 rounded-lg border p-3 animate-pulse">
+                <div className="h-3 w-32 bg-muted rounded mb-2" />
+                <div className="space-y-2">
+                  <div className="h-3 w-48 bg-muted rounded" />
+                  <div className="h-3 w-40 bg-muted rounded" />
+                </div>
+              </div>
+            )}
+            {!loading && displayDecision && (
               <div className="mt-3 rounded-lg border p-3">
                 <p className="text-[10px] font-semibold mb-2">Examiner Decision Record</p>
                 <div className="space-y-1.5 text-xs">

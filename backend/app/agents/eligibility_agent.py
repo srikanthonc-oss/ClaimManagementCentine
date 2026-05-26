@@ -43,7 +43,8 @@ def run_eligibility_agent(claim: dict) -> dict:
     billed_amount = float(claim.get("billed_amount", 0) or 0)
 
     # Try Bedrock for enhanced data generation
-    bedrock_result = _try_bedrock(claim)
+    prompt_used = _build_prompt(claim)
+    bedrock_result = _try_bedrock_with_prompt(prompt_used)
 
     if bedrock_result:
         cob_history = bedrock_result.get("cob_history", [])
@@ -78,16 +79,17 @@ def run_eligibility_agent(claim: dict) -> dict:
     store_stage_output(
         claim_id, STAGE_NUMBER, STAGE_NAME, AGENT_NAME,
         {"claim_number": claim_number, "billed_amount": billed_amount},
-        output_data, outcome, confidence, reasoning
+        output_data, outcome, confidence, reasoning,
+        prompt_text=prompt_used
     )
 
     return output_data
 
 
-def _try_bedrock(claim: dict) -> dict:
-    """Try to use Bedrock for eligibility analysis."""
+def _build_prompt(claim: dict) -> str:
+    """Build the prompt for eligibility analysis."""
     billed = claim.get("billed_amount", 0)
-    prompt = f"""You are a healthcare COB eligibility analyst. Generate realistic COB history and EOB extraction data for:
+    return f"""You are a healthcare COB eligibility analyst. Generate realistic COB history and EOB extraction data for:
 Claim: {claim.get('claim_number')}
 Billed amount: ${billed}
 Classification: {claim.get('classification')}
@@ -114,8 +116,19 @@ Return JSON:
   "confidence": "High" or "Medium" or "Low"
 }}"""
 
+
+def _try_bedrock_with_prompt(prompt: str) -> dict:
+    """Try to use Bedrock with the given prompt."""
+    if not prompt:
+        return None
     response = call_bedrock(prompt, max_tokens=2000)
     return parse_bedrock_json(response)
+
+
+def _try_bedrock(claim: dict) -> dict:
+    """Try to use Bedrock for eligibility analysis (legacy wrapper)."""
+    prompt = _build_prompt(claim)
+    return _try_bedrock_with_prompt(prompt)
 
 
 def _deterministic_logic(claim: dict) -> tuple:

@@ -36,20 +36,20 @@ export function ThemeToggle() {
       title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
       className="relative transition-all duration-500"
     >
-      {/* Sun icon - visible in light theme */}
+      {/* Sun icon - shown in dark theme (click to switch to light) */}
       <Sun
         className={`h-5 w-5 transition-all duration-500 ${
-          theme === 'light'
+          theme === 'dark'
             ? 'rotate-0 scale-100 opacity-100'
             : 'rotate-90 scale-0 opacity-0'
         }`}
         aria-hidden="true"
       />
       
-      {/* Moon icon - visible in dark theme */}
+      {/* Moon icon - shown in light theme (click to switch to dark) */}
       <Moon
         className={`absolute h-5 w-5 transition-all duration-500 ${
-          theme === 'dark'
+          theme === 'light'
             ? 'rotate-0 scale-100 opacity-100'
             : '-rotate-90 scale-0 opacity-0'
         }`}

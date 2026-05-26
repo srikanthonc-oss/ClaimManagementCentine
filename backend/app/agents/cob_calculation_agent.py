@@ -31,7 +31,8 @@ def run_cob_calculation_agent(claim: dict) -> dict:
     total_pr = sum(float(e.get("pr_amount", 0) or 0) for e in eob_data)
 
     # Try Bedrock for enhanced calculation reasoning
-    bedrock_result = _try_bedrock(claim, detail_lines, eob_data, total_pr)
+    prompt_used = _build_prompt(claim, detail_lines, eob_data, total_pr)
+    bedrock_result = _try_bedrock_with_prompt(prompt_used)
 
     if bedrock_result:
         line_calculations = bedrock_result.get("line_calculations", [])
@@ -67,7 +68,8 @@ def run_cob_calculation_agent(claim: dict) -> dict:
     store_stage_output(
         claim_id, STAGE_NUMBER, STAGE_NAME, AGENT_NAME,
         {"claim_number": claim_number, "billed_amount": billed_amount, "total_pr": total_pr},
-        output_data, outcome, confidence, reasoning
+        output_data, outcome, confidence, reasoning,
+        prompt_text=prompt_used
     )
 
     return output_data
@@ -103,9 +105,9 @@ def _fetch_eob_data(claim_id: str) -> list:
     return [dict(zip(cols, row)) for row in rows]
 
 
-def _try_bedrock(claim: dict, detail_lines: list, eob_data: list, total_pr: float) -> dict:
-    """Try to use Bedrock for COB calculation reasoning."""
-    prompt = f"""You are a healthcare COB calculation specialist.
+def _build_prompt(claim: dict, detail_lines: list, eob_data: list, total_pr: float) -> str:
+    """Build the prompt for COB calculation reasoning."""
+    return f"""You are a healthcare COB calculation specialist.
 Apply the 3-condition COB formula for claim {claim.get('claim_number')}:
 
 Detail Lines: {json.dumps(detail_lines, default=str)}
@@ -138,8 +140,19 @@ Return JSON:
   "confidence": "High"
 }}"""
 
+
+def _try_bedrock_with_prompt(prompt: str) -> dict:
+    """Try to use Bedrock with the given prompt."""
+    if not prompt:
+        return None
     response = call_bedrock(prompt, max_tokens=2000)
     return parse_bedrock_json(response)
+
+
+def _try_bedrock(claim: dict, detail_lines: list, eob_data: list, total_pr: float) -> dict:
+    """Try to use Bedrock for COB calculation reasoning (legacy wrapper)."""
+    prompt = _build_prompt(claim, detail_lines, eob_data, total_pr)
+    return _try_bedrock_with_prompt(prompt)
 
 
 def _deterministic_calculation(claim: dict, detail_lines: list, eob_data: list, total_pr: float) -> tuple:

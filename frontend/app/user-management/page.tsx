@@ -35,6 +35,7 @@ import {
   CheckCircle2,
   XCircle,
 } from 'lucide-react'
+import { PageLoader } from '@/components/page-loader'
 
 const allPlatforms: Platform[] = ['Facet', 'Amisys', 'Xcelys']
 
@@ -59,14 +60,26 @@ export default function UserManagementPage() {
   const setUsers = useAuthStore((state) => state.setUsers)
 
   // Fetch users from API on mount
+  const [isPageLoading, setIsPageLoading] = React.useState(true)
   React.useEffect(() => {
     api.users.list()
       .then((data) => {
         if (Array.isArray(data)) {
-          setUsers(data)
+          // Map snake_case from API to camelCase for frontend
+          const mapped = data.map((u: any) => ({
+            id: u.id,
+            email: u.email,
+            name: u.name,
+            role: u.role,
+            platforms: u.platforms || [],
+            isActive: u.is_active !== false, // default to true if not explicitly false
+            createdAt: u.created_at,
+          }))
+          setUsers(mapped)
         }
       })
       .catch(() => {})
+      .finally(() => setIsPageLoading(false))
   }, [setUsers])
 
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
@@ -79,6 +92,10 @@ export default function UserManagementPage() {
   const [formError, setFormError] = React.useState('')
 
   // Only admin can access this page
+  if (isPageLoading) {
+    return <PageLoader message="Loading users..." />
+  }
+
   if (!currentUser || currentUser.role !== 'admin') {
     return (
       <div className="space-y-5">

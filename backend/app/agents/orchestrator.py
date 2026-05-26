@@ -33,35 +33,42 @@ def run_orchestrator(claim_id: str) -> dict:
         if hasattr(val, "as_integer_ratio"):  # Decimal/float duck typing
             claim[key] = float(val)
 
+    # Immediately set status to "Processing" so UI reflects in-progress state
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE claims SET status = 'Processing', updated_at = NOW() WHERE id = %s", (claim["id"],))
+    conn.commit()
+    cur.close()
+    conn.close()
+
     results = {}
 
-    # Stage 1: AI Summary (generated from all other stages at the end)
+    # Stage 2, 3, 4 can run in parallel (no dependencies between them)
+    import concurrent.futures
+    print(f"[Orchestrator] Running Stages 2, 3, 4 in parallel for {claim['claim_number']}")
 
-    # Stage 2: Hold Code Validation
-    print(f"[Orchestrator] Running Stage 2: Hold Code Validation for {claim['claim_number']}")
-    results["stage_2"] = run_hold_code_agent(claim)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        future_2 = executor.submit(run_hold_code_agent, claim)
+        future_3 = executor.submit(run_eligibility_agent, claim)
+        future_4 = executor.submit(run_timely_filing_agent, claim)
 
-    # Stage 3: Member Eligibility
-    print(f"[Orchestrator] Running Stage 3: Member Eligibility for {claim['claim_number']}")
-    results["stage_3"] = run_eligibility_agent(claim)
+        results["stage_2"] = future_2.result()
+        results["stage_3"] = future_3.result()
+        results["stage_4"] = future_4.result()
 
-    # Stage 4: Timely Filing
-    print(f"[Orchestrator] Running Stage 4: Timely Filing for {claim['claim_number']}")
-    results["stage_4"] = run_timely_filing_agent(claim)
-
-    # Stage 5: Coordination Rule
+    # Stage 5: Coordination Rule (depends on Stage 3 EOB data)
     print(f"[Orchestrator] Running Stage 5: Coordination Rule for {claim['claim_number']}")
     results["stage_5"] = run_coordination_agent(claim)
 
-    # Stage 6: COB Calculation
+    # Stage 6: COB Calculation (depends on Stage 3 + 5 data)
     print(f"[Orchestrator] Running Stage 6: COB Calculation for {claim['claim_number']}")
     results["stage_6"] = run_cob_calculation_agent(claim)
 
-    # Stage 7: Posting
+    # Stage 7: Posting (depends on all prior stages)
     print(f"[Orchestrator] Running Stage 7: Posting for {claim['claim_number']}")
     results["stage_7"] = run_posting_agent(claim, results)
 
-    # Stage 8: Post Validation
+    # Stage 8: Post Validation (depends on Stage 7)
     print(f"[Orchestrator] Running Stage 8: Post Validation for {claim['claim_number']}")
     results["stage_8"] = run_post_validation_agent(claim, results)
 

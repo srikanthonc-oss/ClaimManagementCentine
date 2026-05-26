@@ -36,6 +36,7 @@ function formatCompactCurrency(amount: number): string {
 
 export default function DashboardPage() {
   const [claims, setClaims] = React.useState<Claim[]>([])
+  const [dataSources, setDataSources] = React.useState<any[]>([])
   const [viewingClaim, setViewingClaim] = React.useState<Claim | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
   const [fetchError, setFetchError] = React.useState<string | null>(null)
@@ -62,14 +63,16 @@ export default function DashboardPage() {
 
     const doFetch = async () => {
       try {
-        const data = await api.claims.list({ pageSize: '500' })
-        if (!cancelled && data?.claims) {
-          setClaims(data.claims.map(mapClaim))
+        const [claimsData, dsData] = await Promise.all([
+          api.claims.list({ pageSize: '500' }),
+          api.dataSources.list().catch(() => []),
+        ])
+        if (!cancelled) {
+          if (claimsData?.claims) setClaims(claimsData.claims.map(mapClaim))
+          if (Array.isArray(dsData)) setDataSources(dsData)
         }
       } catch (err: any) {
-        if (!cancelled) {
-          setFetchError(err.message || 'Failed to load claims')
-        }
+        if (!cancelled) setFetchError(err.message || 'Failed to load claims')
       } finally {
         if (!cancelled) setIsLoading(false)
       }
@@ -348,43 +351,44 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* HITL Queue — clickable items */}
+        {/* Data Sources */}
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                <span className="text-xs font-semibold">HITL Queue</span>
+                <Activity className="h-3.5 w-3.5 text-blue-400" />
+                <span className="text-xs font-semibold">Connected Data Sources</span>
               </div>
-              <Link href="/pend-processing" className="text-[10px] text-primary hover:underline">
-                View all →
+              <Link href="/data-sources" className="text-[10px] text-primary hover:underline">
+                Manage →
               </Link>
             </div>
             <div className="space-y-3">
-              {hitlQueue.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-4">No claims in HITL queue</p>
+              {dataSources.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-4">No data sources configured</p>
               ) : (
-                hitlQueue.map((claim) => (
-                  <div
-                    key={claim.id}
-                    className="rounded-lg border p-3 cursor-pointer hover:bg-muted/30 transition-colors"
-                    onClick={() => setViewingClaim(claim)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs font-semibold">{claim.claimNumber}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {claim.classification.toLowerCase()} · conf {claim.confidence}%
-                        </p>
-                      </div>
-                      <span className="rounded bg-red-500/20 px-2 py-0.5 text-[10px] font-medium text-red-400">
-                        HITL
-                      </span>
+                dataSources.slice(0, 5).map((ds: any) => (
+                  <div key={ds.id} className="rounded-lg border p-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold">{ds.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {ds.type}
+                        {ds.last_sync ? ` · Last sync: ${new Date(ds.last_sync).toLocaleDateString()}` : ''}
+                      </p>
                     </div>
-                    <div className="mt-2 flex items-center gap-1.5">
-                      <div className="h-1 w-1 rounded-full bg-muted-foreground" />
-                      <p className="text-[10px] text-muted-foreground">{getHITLReason(claim)}</p>
-                    </div>
+                    <span className={cn(
+                      'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                      ds.status === 'active' ? 'bg-green-500/15 text-green-400' :
+                      ds.status === 'error' ? 'bg-red-500/15 text-red-400' :
+                      'bg-muted text-muted-foreground'
+                    )}>
+                      <span className={cn(
+                        'h-1.5 w-1.5 rounded-full',
+                        ds.status === 'active' ? 'bg-green-400 animate-pulse' :
+                        ds.status === 'error' ? 'bg-red-400' : 'bg-muted-foreground'
+                      )} />
+                      {ds.status === 'active' ? 'Active' : ds.status === 'error' ? 'Error' : 'Inactive'}
+                    </span>
                   </div>
                 ))
               )}
