@@ -60,6 +60,10 @@ export const api = {
       request(`/api/claims/${id}/agent-output`),
     getAgentStage: (id: string, stageNumber: number) =>
       request(`/api/claims/${id}/agent-output/stage/${stageNumber}`),
+    getEobImageUrl: (id: string) =>
+      request(`/api/claims/${id}/eob-image-url`),
+    amendPosting: (id: string, lineAmendments: any[]) =>
+      request(`/api/claims/${id}/amend-posting`, { method: 'POST', body: JSON.stringify({ line_amendments: lineAmendments }) }),
     decide: (id: string, action: string, reason: string | null, notes: string) =>
       request(`/api/claims/${id}/decide`, { method: 'POST', body: JSON.stringify({ action, reason, notes }) }),
     clearAll: () => request('/api/claims', { method: 'DELETE' }),

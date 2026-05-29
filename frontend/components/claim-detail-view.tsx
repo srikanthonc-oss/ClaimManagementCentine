@@ -87,12 +87,14 @@ export function ClaimDetailView({ claim, processed, canExecute, onClose, onAppro
 
         {/* Header */}
         <div className="px-6 pt-6 pb-4">
-          <div className="flex items-center gap-2 mb-4">
-            <FileText className="h-5 w-5 text-primary" />
-            <h2 className="text-lg font-bold">Claim {claim.claimNumber}</h2>
+          <div className="flex flex-col items-center gap-2 mb-4">
+            <div className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              <h2 className="text-lg font-bold">Claim {claim.claimNumber}</h2>
+            </div>
             {claim.confidence > 0 && (
               <span className={cn(
-                'ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold',
+                'inline-flex items-center gap-1.5 rounded-full px-4 py-1 text-xs font-semibold',
                 claim.confidence >= 92 ? 'bg-green-500/15 text-green-400' :
                 claim.confidence >= 80 ? 'bg-amber-500/15 text-amber-400' :
                 'bg-red-500/15 text-red-400'

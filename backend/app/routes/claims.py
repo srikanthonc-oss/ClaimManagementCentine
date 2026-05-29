@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 import json
+import os
 from app.db.pool import get_db
 from app.services.auth_middleware import get_current_user, require_role
 from app.services.audit import log_audit
@@ -265,6 +266,66 @@ async def upload_reference_data(req: ReferenceDataRequest, user=Depends(require_
     return {"message": "Reference data uploaded", "counts": counts}
 
 
+@router.get("/{claim_id}/eob-image-url")
+async def get_eob_image_url(claim_id: str, user=Depends(get_current_user)):
+    """Generate a pre-signed S3 URL for the EOB image of a claim."""
+    import boto3
+    from botocore.config import Config
+
+    # Get claim number for the S3 key
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT claim_number FROM claims WHERE id = %s", (claim_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    claim_number = row[0]
+    bucket = os.getenv("S3_BUCKET", "dice-bpaas-bucket")
+    region = os.getenv("AWS_REGION", "us-east-1")
+
+    # Try multiple possible key patterns
+    s3_keys = [
+        f"cob_eob_images/{claim_number}.png",
+        f"cob_eob_images/{claim_number}.jpg",
+        f"cob_eob_images/{claim_number}.pdf",
+        f"{claim_number}.png",
+        f"{claim_number}.jpg",
+        f"{claim_number}.pdf",
+    ]
+
+    try:
+        s3_client = boto3.client("s3", region_name=region, config=Config(retries={'max_attempts': 1}))
+
+        # Find which key exists
+        found_key = None
+        for key in s3_keys:
+            try:
+                s3_client.head_object(Bucket=bucket, Key=key)
+                found_key = key
+                break
+            except Exception:
+                continue
+
+        if not found_key:
+            # No image found in S3
+            return {"url": None, "key": None, "bucket": bucket, "exists": False}
+
+        # Generate pre-signed URL (valid for 1 hour)
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket, 'Key': found_key},
+            ExpiresIn=3600
+        )
+
+        return {"url": url, "key": found_key, "bucket": bucket, "exists": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate S3 URL: {str(e)}")
+
+
 @router.post("/{claim_id}/run-agents")
 async def run_agents(claim_id: str, user=Depends(require_role("admin", "examiner"))):
     """Run the full 8-stage agent pipeline for a claim."""
@@ -426,6 +487,74 @@ async def process_claim(claim_id: str, req: ProcessRequest, user=Depends(require
     return {"status": new_status, "confidence": overall_confidence, "claim_id": claim_id}
 
 
+class AmendPostingRequest(BaseModel):
+    line_amendments: List[dict]  # [{line_number, allowed_amount, non_covered_amount}]
+
+
+@router.post("/{claim_id}/amend-posting")
+async def amend_posting(claim_id: str, req: AmendPostingRequest, user=Depends(require_role("admin", "examiner"))):
+    """Amend posting recommendation values (allowed amount, non-covered) before final decision."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Get current stage 7 output
+    cur.execute("SELECT output_data FROM agent_stage_outputs WHERE claim_id = %s AND stage_number = 7", (claim_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Posting recommendation not found")
+
+    output_data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+
+    # Apply amendments to the CPT line-level processing
+    cpt_processing = output_data.get("cpt_line_level_processing", {})
+    summary_table = cpt_processing.get("summary_table", [])
+
+    for amendment in req.line_amendments:
+        line_num = amendment.get("line_number")
+        for line in summary_table:
+            if line.get("line_number") == line_num:
+                if "allowed_amount" in amendment:
+                    line["allowed_amount"] = amendment["allowed_amount"]
+                    line["allowed_reason"] = f"Amended by examiner ({user.get('name', 'Examiner')})"
+                if "non_covered_amount" in amendment:
+                    line["non_covered_amount"] = amendment["non_covered_amount"]
+                if "claim_status" in amendment:
+                    line["claim_status"] = amendment["claim_status"]
+
+    # Recalculate totals
+    cpt_processing["totals"] = {
+        "total_allowed_amount": round(sum(l.get("allowed_amount", 0) for l in summary_table), 2),
+        "total_non_covered_amount": round(sum(l.get("non_covered_amount", 0) for l in summary_table), 2),
+        "total_copay": round(sum(l.get("copay", 0) for l in summary_table), 2),
+        "total_coinsurance": round(sum(l.get("coinsurance", 0) for l in summary_table), 2),
+        "total_net_amount": round(sum(l.get("net_amount", 0) for l in summary_table), 2),
+    }
+    output_data["cpt_line_level_processing"] = cpt_processing
+
+    # Mark as amended
+    output_data["metadata"] = output_data.get("metadata", {})
+    output_data["metadata"]["amended_by"] = user.get("name", "Examiner")
+    output_data["metadata"]["amended_at"] = "NOW"
+
+    # Update in DB
+    cur.execute("""
+        UPDATE agent_stage_outputs SET output_data = %s, executed_at = NOW()
+        WHERE claim_id = %s AND stage_number = 7
+    """, (json.dumps(output_data), claim_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    try:
+        log_audit(user["id"], "claims_amend_posting", "claim", claim_id, {"amendments": req.line_amendments})
+    except Exception:
+        pass
+
+    return {"status": "amended", "output_data": output_data}
+
+
 @router.post("/{claim_id}/decide")
 async def decide_claim(claim_id: str, req: DecisionRequest, user=Depends(require_role("admin", "examiner"))):
     conn = get_db()
@@ -446,14 +575,11 @@ async def decide_claim(claim_id: str, req: DecisionRequest, user=Depends(require
     new_status = "Pending"
     if req.action == "approve":
         new_status = "Approved"
-        # Keep original AI confidence — don't override to 100
         cur.execute("UPDATE claims SET status=%s, updated_at=NOW() WHERE id=%s", (new_status, claim_id))
     elif req.action == "deny":
         new_status = "Denied"
-        # Keep original AI confidence — don't reset to 0
         cur.execute("UPDATE claims SET status=%s, updated_at=NOW() WHERE id=%s", (new_status, claim_id))
     else:
-        # manual-review — keep confidence, change status to show it needs manual processing
         new_status = "Pending"
         cur.execute("UPDATE claims SET status=%s, updated_at=NOW() WHERE id=%s", (new_status, claim_id))
     conn.commit()

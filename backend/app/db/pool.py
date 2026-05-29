@@ -1,73 +1,20 @@
 import psycopg2
-import psycopg2.pool
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Connection pool - reuse connections instead of creating new ones each time
-_pool = None
-
-
-def _get_pool():
-    """Get or create the connection pool."""
-    global _pool
-    if _pool is None or _pool.closed:
-        _pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=2,
-            maxconn=10,
-            host=os.getenv("DB_HOST"),
-            port=int(os.getenv("PG_PORT", "5432")),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            database=os.getenv("DB_NAME"),
-            sslmode="require"
-        )
-    return _pool
-
 
 def get_db():
-    """Get a database connection from the pool.
-    
-    The returned connection's close() method returns it to the pool
-    instead of actually closing it, so existing code works unchanged.
-    """
-    try:
-        pool = _get_pool()
-        conn = pool.getconn()
-        conn.autocommit = False
-        # Monkey-patch close() to return connection to pool instead of destroying it
-        original_close = conn.close
-        def pooled_close():
-            try:
-                pool.putconn(conn)
-            except Exception:
-                original_close()
-        conn.close = pooled_close
-        return conn
-    except Exception as e:
-        # Fallback to direct connection if pool fails
-        print(f"[DB Pool] Pool error, falling back to direct connection: {e}")
-        return psycopg2.connect(
-            host=os.getenv("DB_HOST"),
-            port=int(os.getenv("PG_PORT", "5432")),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            database=os.getenv("DB_NAME"),
-            sslmode="require"
-        )
-
-
-def release_db(conn):
-    """Return a connection to the pool."""
-    try:
-        pool = _get_pool()
-        pool.putconn(conn)
-    except Exception:
-        try:
-            conn.close()
-        except Exception:
-            pass
+    """Get a new database connection."""
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        port=int(os.getenv("PG_PORT", "5432")),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        database=os.getenv("DB_NAME"),
+        sslmode="require"
+    )
 
 
 def init_db():
@@ -282,5 +229,5 @@ def init_db():
     """)
     conn.commit()
     cur.close()
-    release_db(conn)
+    conn.close()
     print("DB tables initialized")

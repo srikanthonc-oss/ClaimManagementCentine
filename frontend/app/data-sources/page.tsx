@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { PageLoader } from '@/components/page-loader'
 import {
   Dialog,
   DialogContent,
@@ -56,8 +57,9 @@ export default function DataSourcesPage() {
   const isAdmin = currentUser?.role === 'admin'
 
   // Fetch data sources from API on mount
+  const [isPageLoading, setIsPageLoading] = React.useState(true)
   React.useEffect(() => {
-    fetchDataSources()
+    fetchDataSources().finally(() => setIsPageLoading(false))
   }, [fetchDataSources])
 
   // Dialog state
@@ -181,6 +183,10 @@ export default function DataSourcesPage() {
     setIsDeleteDialogOpen(false)
     setDeletingDataSourceId(null)
     setError(null)
+  }
+
+  if (isPageLoading) {
+    return <PageLoader message="Loading data sources..." />
   }
 
   return (
