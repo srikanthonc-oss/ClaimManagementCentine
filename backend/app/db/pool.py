@@ -146,6 +146,8 @@ def init_db():
             copay DECIMAL(12,2) DEFAULT 0,
             coinsurance DECIMAL(12,2) DEFAULT 0,
             oc_paid DECIMAL(12,2) DEFAULT 0,
+            claim_status VARCHAR(10),
+            proc_status VARCHAR(10),
             extracted_at TIMESTAMP DEFAULT NOW()
         );
 
@@ -166,9 +168,9 @@ def init_db():
             cpt VARCHAR(20),
             insurance_name VARCHAR(100),
             paid_amt DECIMAL(12,2) DEFAULT 0,
-            adj_grp_code VARCHAR(50),
-            reason_code VARCHAR(50),
-            pr_amount DECIMAL(12,2) DEFAULT 0,
+            adj_grp_code JSONB DEFAULT '[]',
+            reason_code JSONB DEFAULT '[]',
+            pr_amount JSONB DEFAULT '[]',
             image_ref VARCHAR(255),
             extracted_at TIMESTAMP DEFAULT NOW()
         );
@@ -226,8 +228,35 @@ def init_db():
 
         -- Ensure prompt_text column exists (for existing tables)
         ALTER TABLE agent_stage_outputs ADD COLUMN IF NOT EXISTS prompt_text TEXT;
+
+        -- Ensure claim_status and proc_status columns exist (for existing tables)
+        ALTER TABLE claim_detail_lines ADD COLUMN IF NOT EXISTS claim_status VARCHAR(10);
+        ALTER TABLE claim_detail_lines ADD COLUMN IF NOT EXISTS proc_status VARCHAR(10);
     """)
     conn.commit()
     cur.close()
+
+    # Migrate eob columns to JSONB (separate transaction — won't break init if it fails)
+    try:
+        cur2 = conn.cursor()
+        cur2.execute("SELECT data_type FROM information_schema.columns WHERE table_name = 'claim_eob_extraction' AND column_name = 'adj_grp_code'")
+        row = cur2.fetchone()
+        if row and row[0] != 'jsonb':
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN adj_grp_code DROP DEFAULT")
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN reason_code DROP DEFAULT")
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN pr_amount DROP DEFAULT")
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN adj_grp_code TYPE JSONB USING COALESCE(to_jsonb(adj_grp_code), '[]'::jsonb)")
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN reason_code TYPE JSONB USING COALESCE(to_jsonb(reason_code), '[]'::jsonb)")
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN pr_amount TYPE JSONB USING COALESCE(jsonb_build_array(pr_amount), '[]'::jsonb)")
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN adj_grp_code SET DEFAULT '[]'::jsonb")
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN reason_code SET DEFAULT '[]'::jsonb")
+            cur2.execute("ALTER TABLE claim_eob_extraction ALTER COLUMN pr_amount SET DEFAULT '[]'::jsonb")
+            conn.commit()
+            print("EOB columns migrated to JSONB")
+        cur2.close()
+    except Exception as e:
+        conn.rollback()
+        print(f"EOB column migration skipped: {e}")
+
     conn.close()
     print("DB tables initialized")

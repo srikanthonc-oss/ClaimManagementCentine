@@ -54,9 +54,47 @@ def run_cob_calculation_agent(claim: dict) -> dict:
 
 
 def _build_prompt(claim: dict, detail_lines: list, eob_data: list, cob_history: list, header_detail: dict, denial_details: list) -> str:
-    return f"""You are a healthcare COB calculation specialist. Apply the 3-condition COB formula for this claim.
+    return f"""You are a healthcare COB calculation specialist
 
-Claim: {claim.get('claim_number')}
+Apply the 3-condition COB formula for claim {claim.get('claim_number')}.
+
+Before reasoning, always reproduce:
+1. CPT Line Information
+2. EOB Information
+
+Use these COB rules:
+
+1. If Xcelys Allowed Amount > OC Paid:
+   Not Covered Amount = (Xcelys Allowed Amount - OC Paid) - PR Amount
+   Net Amount = Xcelys Allowed Amount - OC Paid - Not Covered Amount
+
+      Example:
+	OC Paid = 30
+	PR Amt =10
+	Xcelys allowed Amount =61.58
+	Not Covered Amt = Sum ((61.58-30)-10) - 21.58
+	Net Amt = 61.58-30-21.58 = 10
+
+2. If Xcelys Allowed Amount < OC Paid:
+   Not Covered Amount = 0
+   Net Amount = 0
+
+3. If OC Paid is blank or missing:
+   Not Covered Amount = 0
+   Allowed Amount = PR Amount
+
+Always set:
+Claim Status = P
+Proc Status = P
+
+Input sections:
+- CPT Line Information table:
+  S.No, CPT, Mod, Start Date, End Date, Units, Billed Amt, Allowed Amt, Copay, Coins,
+  Net Amount, OC Allowed, OC Paid, Claim Status, Proc Status
+
+- EOB Information table:
+  S.No, CPT, Insurance Name, Paid Amt, Adj Grp Code, RSN, PR Amount
+
 Billed: ${claim.get('billed_amount', 0)}
 Hold Code: {claim.get('hold_code', 'N/A')}
 
@@ -66,13 +104,16 @@ COB History: {json.dumps(cob_history, default=str)}
 Header: {json.dumps(header_detail, default=str)}
 Denial Details: {json.dumps(denial_details, default=str)}
 
-3-Condition COB Formula (apply per line):
-1. If OC Paid > Total PR Amount: Not Covered = (OC Paid - Allowed) - PR Amount
-2. If OC Paid < Total PR Amount: Not Covered = 0, Net Amount = 0
-3. If OC Paid = 0 (empty): Not Covered = 0, Allowed Amount = PR Amount
+Output sections:
+1. AI Reasoning
+- Identify the COB condition applied.
+- Show Not Covered Amount calculation.
+- Show Net Amount calculation.
 
-For each line: identify which condition applies, show calculation steps, determine not_covered_amount and net_amount.
-If formula yields negative, cap at $0 and flag as "Review Required" (overpayment).
+2. Financial Outcome After Business Logic Applied
+   Return a table with:
+  S.No, CPT, Mod, Start Date, End Date, Units, Billed Amt, Allowed Amt, Copay, Coins,
+  Net Amount, OC Allowed, OC Paid, Claim Status, Proc Status
 
 Return ONLY valid JSON with this structure (no markdown):
 {{
@@ -162,13 +203,23 @@ def _deterministic_full_output(claim: dict, detail_lines: list, eob_data: list, 
         coins = float(line.get("coinsurance", 0) or 0)
         oc_paid = float(line.get("oc_paid", 0) or 0)
 
-        # Get PR amount from EOB or calculate
+        # Get PR amount from EOB or calculate — only consider PR group amounts, not CO
         eob_record = eob_by_line.get(cpt, {})
-        pr_amount = float(eob_record.get("pr_amount", 0) or 0)
+        raw_pr = eob_record.get("pr_amount", 0)
+        raw_adj = eob_record.get("adj_grp_code", [])
+        raw_rsn = eob_record.get("reason_code", "")
+        # Pair adj groups with amounts and only sum PR-group amounts
+        pr_amounts_list = raw_pr if isinstance(raw_pr, list) else [raw_pr] if raw_pr else []
+        adj_grps_list = raw_adj if isinstance(raw_adj, list) else [raw_adj] if raw_adj else []
+        pr_amount = 0
+        for idx, amt in enumerate(pr_amounts_list):
+            grp = adj_grps_list[idx] if idx < len(adj_grps_list) else ""
+            if str(grp).strip().upper() == "PR":
+                pr_amount += float(amt or 0)
         if not pr_amount:
             pr_amount = copay + coins  # fallback
-        adj_grp = str(eob_record.get("adj_grp_code", "CO, PR"))
-        reason_code = str(eob_record.get("reason_code", ""))
+        adj_grp = ", ".join(adj_grps_list) if isinstance(raw_adj, list) else str(raw_adj)
+        reason_code = ", ".join(str(r) for r in raw_rsn) if isinstance(raw_rsn, list) else str(raw_rsn)
 
         # Check denial
         denial_code = ""
@@ -176,11 +227,14 @@ def _deterministic_full_output(claim: dict, detail_lines: list, eob_data: list, 
             if d.get("line_no") == line_no:
                 denial_code = str(d.get("reason_code", ""))
 
-        # Apply 3-condition COB formula
+        # Apply 3-condition COB formula (per document):
+        # 1. If Xcelys Allowed Amount > OC Paid: Not Covered = (Allowed - OC Paid) - PR Amount, Net = Allowed - OC Paid - Not Covered
+        # 2. If Xcelys Allowed Amount < OC Paid: Not Covered = 0, Net = 0
+        # 3. If OC Paid is blank/zero: Not Covered = 0, Allowed = PR Amount
         if oc_paid == 0:
             condition = "OC Paid = Empty"
-            condition_details = "OC Paid is $0"
-            formula = "if OC Paid = \"\", Not covered amount = 0, Allowed Amount = PR Amount"
+            condition_details = "OC Paid is $0 or blank"
+            formula = "if OC Paid is blank or missing: Not Covered Amount = 0, Allowed Amount = PR Amount"
             calc_steps = [f"OC Paid Amount: $0", f"PR Amount: ${pr_amount:.2f}", "Condition: OC Paid is empty/zero", f"Allowed Amount = PR Amount = ${pr_amount:.2f}"]
             not_covered = 0
             net_amount = pr_amount
@@ -188,47 +242,48 @@ def _deterministic_full_output(claim: dict, detail_lines: list, eob_data: list, 
             final_adj = 0
             status = "Valid"
             notes = "No OC payment - using PR amount as allowed"
-        elif oc_paid < pr_amount:
-            condition = "OC Paid < Total PR Amount"
-            condition_details = f"{oc_paid:.2f} < {pr_amount:.2f}"
-            formula = "if OC Paid < Total PR amount, Not covered amount = 0, Net amount=0"
-            calc_steps = [f"OC Paid Amount: ${oc_paid:.2f}", f"Total PR Amount: ${pr_amount:.2f}", f"Comparison: ${oc_paid:.2f} < ${pr_amount:.2f} = TRUE"]
+        elif allowed > oc_paid:
+            condition = "Xcelys Allowed Amount > OC Paid"
+            condition_details = f"Allowed ${allowed:.2f} > OC Paid ${oc_paid:.2f}"
+            not_covered = (allowed - oc_paid) - pr_amount
+            if not_covered < 0:
+                not_covered = 0
+            net_amount = allowed - oc_paid - not_covered
+            formula = "Not Covered = (Xcelys Allowed Amount - OC Paid) - PR Amount; Net Amount = Allowed - OC Paid - Not Covered"
+            calc_steps = [
+                f"Xcelys Allowed Amount: ${allowed:.2f}",
+                f"OC Paid Amount: ${oc_paid:.2f}",
+                f"PR Amount: ${pr_amount:.2f}",
+                f"Comparison: ${allowed:.2f} > ${oc_paid:.2f} = TRUE",
+                f"Not Covered Amount = (${allowed:.2f} - ${oc_paid:.2f}) - ${pr_amount:.2f} = ${not_covered:.2f}",
+                f"Net Amount = ${allowed:.2f} - ${oc_paid:.2f} - ${not_covered:.2f} = ${net_amount:.2f}",
+            ]
+            final_allowed = allowed
+            final_adj = 0
+            status = "Valid"
+            notes = f"Condition 1 applied: Allowed > OC Paid. Net Amount = ${net_amount:.2f}"
+        else:
+            condition = "Xcelys Allowed Amount < OC Paid"
+            condition_details = f"Allowed ${allowed:.2f} < OC Paid ${oc_paid:.2f}"
+            formula = "if Xcelys Allowed Amount < OC Paid: Not Covered Amount = 0, Net Amount = 0"
+            calc_steps = [
+                f"Xcelys Allowed Amount: ${allowed:.2f}",
+                f"OC Paid Amount: ${oc_paid:.2f}",
+                f"Comparison: ${allowed:.2f} < ${oc_paid:.2f} = TRUE",
+                "Not Covered Amount = 0",
+                "Net Amount = 0",
+            ]
             not_covered = 0
             net_amount = 0
             final_allowed = allowed
             final_adj = 0
             status = "Valid"
-            notes = "Secondary pays less than primary - no over-payment issue"
-        else:
-            condition = "OC Paid > Total PR Amount"
-            condition_details = f"{oc_paid:.2f} > {pr_amount:.2f}"
-            formula = "if OC Paid > Total PR amount, Not covered amount = (OC Paid Amount - Allowed amount) - PR Amount"
-            raw_calc = (oc_paid - allowed) - pr_amount
-            calc_steps = [
-                f"OC Paid Amount: ${oc_paid:.2f}",
-                f"Total PR Amount: ${pr_amount:.2f}",
-                f"Comparison: ${oc_paid:.2f} > ${pr_amount:.2f} = TRUE",
-                f"Not Covered Amount = (${oc_paid:.2f} - ${allowed:.2f}) - ${pr_amount:.2f}",
-                f"Not Covered Amount = ${oc_paid - allowed:.2f} - ${pr_amount:.2f}",
-                f"Not Covered Amount = ${raw_calc:.2f}",
-            ]
-            if raw_calc < 0:
-                calc_steps.append(f"Capped at: $0 (negative values set to zero)")
-                not_covered = 0
-                status = "Review Required"
-                notes = "Secondary overpayment detected - potential recoupment needed"
-                lines_review += 1
-            else:
-                not_covered = round(raw_calc, 2)
-                status = "Valid"
-                notes = "Non-covered amount calculated"
-                lines_valid += 1
-            net_amount = 0
-            final_allowed = allowed
-            final_adj = round(raw_calc, 2)
+            notes = "OC Paid exceeds allowed - no additional payment needed"
 
-        if status == "Valid" and not_covered == 0 and final_adj == 0:
+        if status == "Valid":
             lines_valid += 1
+        else:
+            lines_review += 1
 
         total_billed += billed
         total_allowed += allowed

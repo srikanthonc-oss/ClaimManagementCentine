@@ -52,6 +52,24 @@ def run_eligibility_agent(claim: dict) -> dict:
         # Deterministic fallback
         output_data = _deterministic_full_output(claim, cob_history, eob_data, detail_lines)
 
+    # Always override critical fields with deterministic logic (Bedrock often gets insurance matching wrong)
+    try:
+        det_output = _deterministic_full_output(claim, cob_history, eob_data, detail_lines)
+        # Override coverage details
+        if det_output.get("coverage_details"):
+            output_data["coverage_details"] = det_output["coverage_details"]
+        # Override recommendation
+        if det_output.get("recommendation"):
+            output_data["recommendation"] = det_output["recommendation"]
+        # Override AI reasoning
+        if det_output.get("ai_reasoning"):
+            output_data["ai_reasoning"] = det_output["ai_reasoning"]
+        # Remove any raw eob_data objects that Bedrock may have included
+        for key in ["eob_data", "eob_extraction", "raw_eob"]:
+            output_data.pop(key, None)
+    except Exception:
+        pass
+
     # Store COB history if generated (not from reference data)
     if not cob_history:
         generated_cob = output_data.get("ai_reasoning", {}).get("primary_insurance_identification", {}).get("analysis", [])
@@ -67,9 +85,9 @@ def run_eligibility_agent(claim: dict) -> dict:
                 "cpt": "99213",
                 "insurance_name": output_data.get("coverage_details", {}).get("eob_insurance_name", ""),
                 "paid_amt": 0,
-                "adj_grp_code": "PR",
-                "reason_code": pr_codes[0].get("code", "") if pr_codes else "",
-                "pr_amount": float(pr_codes[0].get("amount", "0").replace("$", "")) if pr_codes else 0,
+                "adj_grp_code": json.dumps(["PR"]),
+                "reason_code": json.dumps([pr_codes[0].get("code", "")] if pr_codes else []),
+                "pr_amount": json.dumps([float(pr_codes[0].get("amount", "0").replace("$", ""))] if pr_codes else []),
                 "image_ref": "",
             }])
 
@@ -111,10 +129,16 @@ EOB Data: {json.dumps(eob_data, default=str)}
 Detail Lines: {json.dumps(detail_lines, default=str)}
 
 Business Logic:
-1. To identify the active primary insurance, apply: Date of service > Effective date AND Term date > Date of service. Source: COBHistory
-2. EOB attachment present: Identified primary insurance should match EOB insurance name. If not matching, Deny as DN017 (Medicare) or DN018 (Commercial)
-3. Primary EOB doesn't contain PR reasons: Denied as "DNEOB"
-4. EOB attachment not present: Deny with DN017 (Medicare) or DN018 (Commercial)
+
+To identify the active primary insurance, apply the logic "Date of service" should be greater than Effective date and termed date should be less than date of service.
+
+EOB attachment present -
+Identified primary insurance should match with EOB attachment insurance name. if it is not matching Deny as DN017 - Medicare, DN018 - Commercial
+EOB data (Adjustment group code) doesn't contains PR reasons , Reason code description then Denied as "DNEOB"
+
+EOB attachment not present -
+Deny the claim with DN017 - Medicare,
+Commercial Insurance DN018
 
 Return ONLY this exact JSON structure:
 {{
@@ -234,10 +258,26 @@ def _deterministic_full_output(claim: dict, cob_history: list, eob_data: list, d
             eff_date = record.get("effective_date", "")
             term_date = record.get("term_date", "")
 
-            # Check if DOS is within coverage period
-            dos_gt_eff = max_dos > eff_date if eff_date else True
-            term_gt_dos = term_date > max_dos if term_date else True
-            is_active = dos_gt_eff and term_gt_dos
+            # Parse dates for proper comparison (not string comparison)
+            def parse_date(d):
+                if not d:
+                    return None
+                for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
+                    try:
+                        return datetime.strptime(str(d).strip(), fmt)
+                    except ValueError:
+                        continue
+                return None
+
+            dos_parsed = parse_date(max_dos)
+            eff_parsed = parse_date(eff_date)
+            term_parsed = parse_date(term_date)
+
+            # Business logic: DOS > Effective Date AND Term Date < DOS (or no term = still active)
+            dos_gt_eff = dos_parsed > eff_parsed if (dos_parsed and eff_parsed) else True
+            term_lt_dos = term_parsed < dos_parsed if (term_parsed and dos_parsed) else False
+            # Active means: DOS is after effective AND (no term date OR term date is after DOS)
+            is_active = dos_gt_eff and (not term_parsed or term_parsed >= dos_parsed)
 
             if is_active and not primary_eff_date:
                 primary_insurance = ins_name
@@ -249,9 +289,9 @@ def _deterministic_full_output(claim: dict, cob_history: list, eob_data: list, d
                 "effective_date": eff_date,
                 "term_date": term_date,
                 "dos_greater_than_effective": dos_gt_eff,
-                "term_date_less_than_dos": not term_gt_dos,
+                "term_date_less_than_dos": term_lt_dos,
                 "is_active": is_active,
-                "status": f"ACTIVE - {ins_name} is Primary on DOS" if is_active else f"INACTIVE - Not Primary on DOS (DOS is {'AFTER' if not term_gt_dos else 'BEFORE'} coverage period)",
+                "status": f"ACTIVE - {ins_name} is Primary on DOS" if is_active else f"INACTIVE - Not Primary on DOS (term date {term_date} is before DOS {max_dos})" if term_lt_dos else f"INACTIVE - DOS {max_dos} is before effective date {eff_date}",
             })
     else:
         # Generate default
@@ -278,19 +318,34 @@ def _deterministic_full_output(claim: dict, cob_history: list, eob_data: list, d
     if eob_data:
         eob_record = eob_data[0]
         eob_insurance_name = str(eob_record.get("insurance_name", ""))
-        reason_code = str(eob_record.get("reason_code", ""))
-        pr_amount = float(eob_record.get("pr_amount", 0) or 0)
-        paid_amt = float(eob_record.get("paid_amt", 0) or 0)
-        adj_grp = str(eob_record.get("adj_grp_code", ""))
+        # Handle JSONB arrays — reason_code, pr_amount, adj_grp_code may be lists
+        raw_reason = eob_record.get("reason_code", "")
+        raw_pr = eob_record.get("pr_amount", 0)
+        raw_adj = eob_record.get("adj_grp_code", "")
+        reason_codes = raw_reason if isinstance(raw_reason, list) else [raw_reason] if raw_reason else []
+        pr_amounts = raw_pr if isinstance(raw_pr, list) else [raw_pr] if raw_pr else []
+        adj_grps = raw_adj if isinstance(raw_adj, list) else [raw_adj] if raw_adj else []
 
-        if reason_code:
-            pr_codes.append({
-                "code": reason_code,
-                "description": PR_CODE_DESCRIPTIONS.get(reason_code, "Adjustment"),
-                "amount": f"${pr_amount:.2f}",
-            })
-        if adj_grp:
-            for code in adj_grp.replace(",", " ").split():
+        # Only consider PR-group reason codes and amounts (not CO)
+        reason_code = ""
+        pr_amount = 0
+        paid_amt = float(eob_record.get("paid_amt", 0) or 0)
+
+        for i, rc in enumerate(reason_codes):
+            grp = adj_grps[i] if i < len(adj_grps) else ""
+            amt = float(pr_amounts[i]) if i < len(pr_amounts) else 0
+            if str(grp).strip().upper() == "PR":
+                if not reason_code:
+                    reason_code = str(rc)
+                pr_amount += amt
+                if rc:
+                    pr_codes.append({
+                        "code": str(rc),
+                        "description": PR_CODE_DESCRIPTIONS.get(str(rc), "Adjustment"),
+                        "amount": f"${amt:.2f}",
+                    })
+        for ag in adj_grps:
+            for code in str(ag).replace(",", " ").split():
                 code = code.strip()
                 if code:
                     adj_group_codes.append({
@@ -479,12 +534,22 @@ def _store_eob_extraction(claim_id: str, eob_data: list):
     cur = conn.cursor()
     cur.execute("DELETE FROM claim_eob_extraction WHERE claim_id = %s", (claim_id,))
     for record in eob_data:
+        # adj_grp_code, reason_code, pr_amount should already be JSON strings
+        adj_grp = record.get("adj_grp_code", "[]")
+        reason = record.get("reason_code", "[]")
+        pr_amt = record.get("pr_amount", "[]")
+        # If they're not already JSON strings, wrap as arrays
+        if not isinstance(adj_grp, str):
+            adj_grp = json.dumps([adj_grp] if adj_grp else [])
+        if not isinstance(reason, str):
+            reason = json.dumps([reason] if reason else [])
+        if not isinstance(pr_amt, str):
+            pr_amt = json.dumps([pr_amt] if pr_amt else [])
         cur.execute("""
             INSERT INTO claim_eob_extraction (claim_id, sno, cpt, insurance_name, paid_amt, adj_grp_code, reason_code, pr_amount, image_ref)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s)
         """, (claim_id, record.get("sno", 1), record.get("cpt", ""), record.get("insurance_name", ""),
-              record.get("paid_amt", 0), record.get("adj_grp_code", ""), record.get("reason_code", ""),
-              record.get("pr_amount", 0), record.get("image_ref", "")))
+              record.get("paid_amt", 0), adj_grp, reason, pr_amt, record.get("image_ref", "")))
     conn.commit()
     cur.close()
     conn.close()

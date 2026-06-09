@@ -572,7 +572,6 @@ function renderStage4Content(data: any): React.ReactNode {
         <p className="text-[10px] font-semibold text-muted-foreground">Source: Claim_Header, Claim_Detail</p>
         <div className="space-y-2 text-xs">
           <div className="rounded border p-2 space-y-1.5">
-            <div className="flex justify-between"><span className="text-muted-foreground">Days Aged</span><span className={cn('font-bold', withinLimit ? 'text-green-400' : 'text-red-400')}>{daysAged} days</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">State</span><span className="font-semibold">{stateVal}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Filing Limit</span><span className="font-mono">{filingLimit} days</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Days Remaining</span><span className={cn('font-semibold', data.days_remaining > 30 ? 'text-green-400' : data.days_remaining > 0 ? 'text-amber-400' : 'text-red-400')}>{data.days_remaining} days</span></div>
@@ -611,10 +610,6 @@ function renderStage4Content(data: any): React.ReactNode {
               </tr>
             </thead>
             <tbody>
-              <tr className="border-t">
-                <td className="px-2 py-1 border-r">Days Aged</td>
-                <td className="px-2 py-1 font-semibold">{daysAged} days</td>
-              </tr>
               <tr className="border-t">
                 <td className="px-2 py-1 border-r">State</td>
                 <td className="px-2 py-1">{stateVal} (standard {filingLimit}-day window)</td>
@@ -862,7 +857,7 @@ function renderStage5Content(data: any): React.ReactNode {
             <div className="overflow-auto">
               <table className="w-full text-[10px] border">
                 <thead><tr className="bg-muted/50"><th className="px-1.5 py-1 border-r font-semibold">Table</th><th className="px-1.5 py-1 font-semibold">Evidence</th></tr></thead>
-                <tbody>{evidence.map((e: any, i: number) => (<tr key={i} className="border-t"><td className="px-1.5 py-1 border-r font-mono">{e.table}</td><td className="px-1.5 py-1 text-muted-foreground">{e.evidence}</td></tr>))}</tbody>
+                <tbody>{evidence.map((e: any, i: number) => (<tr key={i} className="border-t"><td className="px-1.5 py-1 border-r font-mono">{e.table}</td><td className="px-1.5 py-1 text-muted-foreground">{typeof e.evidence === 'string' ? e.evidence : JSON.stringify(e.evidence)}</td></tr>))}</tbody>
               </table>
             </div>
           </div>
@@ -994,25 +989,16 @@ function renderStage6Content(data: any): React.ReactNode {
         )
       })}
 
-      {/* Financial Summary Table */}
-      <p className="text-[10px] font-semibold text-muted-foreground">Financial Summary</p>
+      {/* Financial Outcome After Business Logic Applied */}
+      <p className="text-[10px] font-semibold text-muted-foreground">Financial Outcome After Business Logic Applied</p>
       <div className="overflow-auto">
         <table className="w-full text-[10px] border">
-          <thead><tr className="bg-muted/50"><th className="px-1.5 py-1 border-r font-semibold">CPT</th><th className="px-1.5 py-1 border-r font-semibold text-right">Allowed</th><th className="px-1.5 py-1 border-r font-semibold text-right">Copay</th><th className="px-1.5 py-1 border-r font-semibold text-right">Coins</th><th className="px-1.5 py-1 border-r font-semibold text-right">OC Paid</th><th className="px-1.5 py-1 font-semibold text-right">PR Amt</th></tr></thead>
+          <thead><tr className="bg-muted/50"><th className="px-1 py-1 border-r font-semibold">S.No</th><th className="px-1 py-1 border-r font-semibold">CPT</th><th className="px-1 py-1 border-r font-semibold">Mod</th><th className="px-1 py-1 border-r font-semibold">Start Date</th><th className="px-1 py-1 border-r font-semibold">End Date</th><th className="px-1 py-1 border-r font-semibold text-right">Units</th><th className="px-1 py-1 border-r font-semibold text-right">Billed Amt</th><th className="px-1 py-1 border-r font-semibold text-right">Allowed Amt</th><th className="px-1 py-1 border-r font-semibold text-right">Not Covered</th><th className="px-1 py-1 border-r font-semibold text-right">Copay</th><th className="px-1 py-1 border-r font-semibold text-right">Coins</th><th className="px-1 py-1 border-r font-semibold text-right">Net Amt</th><th className="px-1 py-1 border-r font-semibold text-right">OC Paid</th><th className="px-1 py-1 border-r font-semibold">Claim Status</th><th className="px-1 py-1 font-semibold">Proc Status</th></tr></thead>
           <tbody>
-            {cptDetail.map((row: any, i: number) => (<tr key={i} className="border-t"><td className="px-1.5 py-1 border-r font-mono">{row.cpt}</td><td className="px-1.5 py-1 border-r text-right">${Number(row.allowed_amt).toFixed(2)}</td><td className="px-1.5 py-1 border-r text-right">${Number(row.copay).toFixed(2)}</td><td className="px-1.5 py-1 border-r text-right">${Number(row.coins).toFixed(2)}</td><td className="px-1.5 py-1 border-r text-right">${Number(row.oc_paid).toFixed(2)}</td><td className="px-1.5 py-1 text-right">${Number(eobSummary[i]?.pr_amount || 0).toFixed(2)}</td></tr>))}
-            <tr className="border-t font-semibold"><td className="px-1.5 py-1 border-r">TOTAL</td><td className="px-1.5 py-1 border-r text-right">${Number(totals.total_allowed_amount || 0).toFixed(2)}</td><td className="px-1.5 py-1 border-r text-right">${Number(totals.total_copay || 0).toFixed(2)}</td><td className="px-1.5 py-1 border-r text-right">${Number(totals.total_coinsurance || 0).toFixed(2)}</td><td className="px-1.5 py-1 border-r text-right">${Number(totals.total_oc_paid || 0).toFixed(2)}</td><td className="px-1.5 py-1 text-right">${Number(totals.total_pr_amount || 0).toFixed(2)}</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* Outcome Table */}
-      <p className="text-[10px] font-semibold text-muted-foreground">Outcome</p>
-      <div className="overflow-auto">
-        <table className="w-full text-[10px] border">
-          <thead><tr className="bg-muted/50"><th className="px-1.5 py-1 border-r font-semibold">CPT</th><th className="px-1.5 py-1 border-r font-semibold text-right">Allowed</th><th className="px-1.5 py-1 border-r font-semibold text-right">Non-Covered</th><th className="px-1.5 py-1 border-r font-semibold text-right">Adjustment</th><th className="px-1.5 py-1 border-r font-semibold text-right">Sec. Paid</th><th className="px-1.5 py-1 font-semibold">Status</th></tr></thead>
-          <tbody>
-            {finalCalcs.map((row: any, i: number) => (<tr key={i} className="border-t"><td className="px-1.5 py-1 border-r font-mono">{row.cpt}</td><td className="px-1.5 py-1 border-r text-right">${Number(row.final_allowed_amt).toFixed(2)}</td><td className="px-1.5 py-1 border-r text-right">${Number(row.final_non_covered_amt).toFixed(2)}</td><td className={cn('px-1.5 py-1 border-r text-right', Number(row.final_adjustment) < 0 ? 'text-red-400' : '')}>{Number(row.final_adjustment) < 0 ? `-$${Math.abs(Number(row.final_adjustment)).toFixed(2)}*` : `$${Number(row.final_adjustment).toFixed(2)}`}</td><td className="px-1.5 py-1 border-r text-right">${Number(row.secondary_paid).toFixed(2)}</td><td className={cn('px-1.5 py-1 font-semibold', row.status === 'Valid' ? 'text-green-400' : 'text-amber-400')}>{row.status === 'Valid' ? '✓' : '⚠'} {row.status}</td></tr>))}
+            {claimLines.map((line: any, i: number) => {
+              const calc = line.cob_calculation || {}
+              return (<tr key={i} className="border-t"><td className="px-1 py-1 border-r">{line.line_number}</td><td className="px-1 py-1 border-r font-mono">{line.cpt_code}</td><td className="px-1 py-1 border-r">{line.modifier}</td><td className="px-1 py-1 border-r">{line.start_date}</td><td className="px-1 py-1 border-r">{line.end_date}</td><td className="px-1 py-1 border-r text-right">{line.units}</td><td className="px-1 py-1 border-r text-right">${Number(line.billed_amount).toFixed(2)}</td><td className="px-1 py-1 border-r text-right">${Number(line.allowed_amount).toFixed(2)}</td><td className="px-1 py-1 border-r text-right">${Number(calc.not_covered_amount || 0).toFixed(2)}</td><td className="px-1 py-1 border-r text-right">${Number(line.copay).toFixed(2)}</td><td className="px-1 py-1 border-r text-right">${Number(line.coinsurance).toFixed(2)}</td><td className="px-1 py-1 border-r text-right">${Number(calc.net_amount || 0).toFixed(2)}</td><td className="px-1 py-1 border-r text-right">${Number(line.oc_paid).toFixed(2)}</td><td className="px-1 py-1 border-r font-semibold">P</td><td className="px-1 py-1 font-semibold">P</td></tr>)
+            })}
           </tbody>
         </table>
       </div>
@@ -1406,16 +1392,28 @@ function renderStage8Content(data: any): React.ReactNode {
 }
 
 function renderStageContent(stageNumber: number, data: any, claimId?: string): React.ReactNode {
+  // Deep sanitize: convert any JSONB arrays and nested objects that might be rendered as React children
+  const sanitized = JSON.parse(JSON.stringify(data, (key, value) => {
+    // Convert JSONB array fields to comma-separated strings
+    if ((key === 'adj_grp_code' || key === 'reason_code' || key === 'pr_amount') && Array.isArray(value)) {
+      return value.join(', ')
+    }
+    // If an array contains objects with eob-like keys, stringify them
+    if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0] !== null && 'insurance_name' in value[0] && 'paid_amt' in value[0]) {
+      return value.map((v: any) => `${v.insurance_name || ''} - CPT ${v.cpt || ''} - $${v.paid_amt || 0}`)
+    }
+    return value
+  }))
   switch (stageNumber) {
-    case 1: return renderStage1Content(data)
-    case 2: return renderStage2Content(data)
-    case 3: return renderStage3Content(data, claimId)
-    case 4: return renderStage4Content(data)
-    case 5: return renderStage5Content(data)
-    case 6: return renderStage6Content(data)
-    case 7: return renderStage7Content(data)
-    case 8: return renderStage8Content(data)
-    default: return <pre className="text-[10px] whitespace-pre-wrap">{JSON.stringify(data, null, 2)}</pre>
+    case 1: return renderStage1Content(sanitized)
+    case 2: return renderStage2Content(sanitized)
+    case 3: return renderStage3Content(sanitized, claimId)
+    case 4: return renderStage4Content(sanitized)
+    case 5: return renderStage5Content(sanitized)
+    case 6: return renderStage6Content(sanitized)
+    case 7: return renderStage7Content(sanitized)
+    case 8: return renderStage8Content(sanitized)
+    default: return <pre className="text-[10px] whitespace-pre-wrap">{JSON.stringify(sanitized, null, 2)}</pre>
   }
 }
 
@@ -1542,7 +1540,7 @@ function buildStagesLocally(claim: Claim): StageData[] {
             <li>Primary Insurance: <span className="font-semibold">{primaryInsurance.insurance}</span></li>
             <li>Total Billed: <span className="font-semibold">${totalBilled.toFixed(2)}</span> | Allowed: <span className="font-semibold">${totalAllowed.toFixed(2)}</span></li>
             <li>OC Paid: <span className="font-semibold">${totalOcPaid.toFixed(2)}</span> | PR Amount: <span className="font-semibold">${eob.prAmount.toFixed(2)}</span></li>
-            <li>Days Aged: {dateDiff} — {isTimelyFiled ? 'Within Window' : 'EXCEEDED'}</li>
+            <li>Timely Filing: {isTimelyFiled ? 'Within Window' : 'EXCEEDED'}</li>
           </ul>
         </div>
       ),
@@ -1591,7 +1589,6 @@ function buildStagesLocally(claim: Claim): StageData[] {
       content: (
         <div className="space-y-3">
           <div className="rounded border p-2 space-y-1.5 text-xs">
-            <div className="flex justify-between"><span className="text-muted-foreground">Days Aged</span><span className="font-bold">{dateDiff} days</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Limit</span><span>{timelyFilingLimit} days</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className={cn(isTimelyFiled ? 'text-green-400' : 'text-red-400')}>{isTimelyFiled ? 'PASS' : 'FAIL'}</span></div>
           </div>

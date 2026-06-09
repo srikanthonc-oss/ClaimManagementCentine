@@ -22,14 +22,10 @@ def run_posting_agent(claim: dict, prior_results: dict) -> dict:
     # Get examiner decision if available (from HITL flow)
     examiner_decision = prior_results.get("examiner_decision", "")
 
-    # Try Bedrock
+    # Always use deterministic output (fetches fresh from DB, applies correct COB formula)
+    # Bedrock's posting responses are often inconsistent with actual DB data
+    output_data = _deterministic_full_output(claim, prior_results, examiner_decision)
     prompt_used = _build_prompt(claim, prior_results, examiner_decision)
-    bedrock_result = _try_bedrock_with_prompt(prompt_used)
-
-    if bedrock_result:
-        output_data = bedrock_result
-    else:
-        output_data = _deterministic_full_output(claim, prior_results, examiner_decision)
 
     # Extract key fields
     final_rec = output_data.get("final_recommendation", {})
@@ -173,52 +169,82 @@ def _deterministic_full_output(claim: dict, prior_results: dict, examiner_decisi
     stage_5 = prior_results.get("stage_5", {})
     stage_6 = prior_results.get("stage_6", {})
 
-    # Get claim lines from stage 6 (COB calculation)
+    # Always fetch fresh data from DB and apply COB formula
+    # (ensures posting screen always reflects current DB state, not stale stage cache)
     claim_lines = []
-    stage_6_analysis = stage_6.get("claim_analysis", {}) if isinstance(stage_6, dict) else {}
-    if stage_6_analysis:
-        claim_lines = stage_6_analysis.get("claim_lines", [])
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT line_no, cpt, modifier, start_date, end_date, units, billed_amt, allowed_amt, copay, coinsurance, oc_paid FROM claim_detail_lines WHERE claim_id = %s ORDER BY line_no", (claim.get("id"),))
+        cols = [desc[0] for desc in cur.description]
+        db_lines = [dict(zip(cols, row)) for row in cur.fetchall()]
 
-    # Fallback: if no claim lines from stage 6, fetch from DB directly
-    if not claim_lines:
-        try:
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute("SELECT line_no, cpt, modifier, start_date, end_date, units, billed_amt, allowed_amt, copay, coinsurance, oc_paid FROM claim_detail_lines WHERE claim_id = %s ORDER BY line_no", (claim.get("id"),))
-            cols = [desc[0] for desc in cur.description]
-            db_lines = [dict(zip(cols, row)) for row in cur.fetchall()]
-            cur.close()
-            conn.close()
-            # Convert to stage 6 format
-            for line in db_lines:
-                allowed = float(line.get("allowed_amt", 0) or 0)
-                copay = float(line.get("copay", 0) or 0)
-                coins = float(line.get("coinsurance", 0) or 0)
-                oc_paid = float(line.get("oc_paid", 0) or 0)
+        # Get EOB data for PR amounts
+        cur.execute("SELECT cpt, adj_grp_code, reason_code, pr_amount FROM claim_eob_extraction WHERE claim_id = %s", (claim.get("id"),))
+        eob_cols = [desc[0] for desc in cur.description]
+        eob_rows = [dict(zip(eob_cols, row)) for row in cur.fetchall()]
+        eob_by_cpt = {str(e.get("cpt", "")): e for e in eob_rows}
+        cur.close()
+        conn.close()
+
+        # Convert to stage 6 format with proper COB calculation
+        for line in db_lines:
+            cpt = str(line.get("cpt", ""))
+            allowed = float(line.get("allowed_amt", 0) or 0)
+            copay = float(line.get("copay", 0) or 0)
+            coins = float(line.get("coinsurance", 0) or 0)
+            oc_paid = float(line.get("oc_paid", 0) or 0)
+
+            # Get PR amount from EOB (only PR group)
+            eob_rec = eob_by_cpt.get(cpt, {})
+            raw_pr = eob_rec.get("pr_amount", [])
+            raw_adj = eob_rec.get("adj_grp_code", [])
+            pr_amounts_list = raw_pr if isinstance(raw_pr, list) else [raw_pr] if raw_pr else []
+            adj_grps_list = raw_adj if isinstance(raw_adj, list) else [raw_adj] if raw_adj else []
+            pr_amount = 0
+            for idx, amt in enumerate(pr_amounts_list):
+                grp = adj_grps_list[idx] if idx < len(adj_grps_list) else ""
+                if str(grp).strip().upper() == "PR":
+                    pr_amount += float(amt or 0)
+            if not pr_amount:
                 pr_amount = copay + coins
-                claim_lines.append({
-                    "line_number": line.get("line_no", 1),
-                    "cpt_code": str(line.get("cpt", "")),
-                    "modifier": str(line.get("modifier", "0")),
-                    "start_date": str(line.get("start_date", "")),
-                    "end_date": str(line.get("end_date", "")),
-                    "units": line.get("units", 1),
-                    "billed_amount": float(line.get("billed_amt", 0) or 0),
-                    "allowed_amount": allowed,
-                    "copay": copay,
-                    "coinsurance": coins,
-                    "oc_paid": oc_paid,
-                    "pr_amount": pr_amount,
-                    "denial_reason": "",
-                    "cob_calculation": {
-                        "not_covered_amount": 0,
-                        "net_amount": oc_paid,
-                        "final_adjustment": 0,
-                        "status": "Valid",
-                    },
-                })
-        except Exception:
-            pass
+
+            # Apply 3-condition COB formula
+            if oc_paid == 0:
+                not_covered = 0
+                net_amount = pr_amount
+            elif allowed > oc_paid:
+                not_covered = (allowed - oc_paid) - pr_amount
+                if not_covered < 0:
+                    not_covered = 0
+                net_amount = allowed - oc_paid - not_covered
+            else:
+                not_covered = 0
+                net_amount = 0
+
+            claim_lines.append({
+                "line_number": line.get("line_no", 1),
+                "cpt_code": cpt,
+                "modifier": str(line.get("modifier", "0")),
+                "start_date": str(line.get("start_date", "")),
+                "end_date": str(line.get("end_date", "")),
+                "units": line.get("units", 1),
+                "billed_amount": float(line.get("billed_amt", 0) or 0),
+                "allowed_amount": allowed,
+                "copay": copay,
+                "coinsurance": coins,
+                "oc_paid": oc_paid,
+                "pr_amount": pr_amount,
+                "denial_reason": "",
+                "cob_calculation": {
+                    "not_covered_amount": round(not_covered, 2),
+                    "net_amount": round(net_amount, 2),
+                    "final_adjustment": 0,
+                    "status": "Valid",
+                },
+            })
+    except Exception:
+        pass
 
     # If still no lines, generate from billed amount
     if not claim_lines:
@@ -271,6 +297,20 @@ def _deterministic_full_output(claim: dict, prior_results: dict, examiner_decisi
         rec_action = stage_5_analysis.get("recommended_action_type", {})
         cob_rule_status = rec_action.get("action_type", "COORDINATION")
 
+    # Fetch denial details from DB for this claim
+    claim_denial_codes = {}
+    try:
+        conn2 = get_db()
+        cur2 = conn2.cursor()
+        cur2.execute("SELECT line_no, reason_code FROM claim_denial_details WHERE claim_id = %s", (claim.get("id"),))
+        for row in cur2.fetchall():
+            if row[1]:  # only if reason_code is non-empty
+                claim_denial_codes[row[0]] = str(row[1])
+        cur2.close()
+        conn2.close()
+    except Exception:
+        pass
+
     # Build CPT line processing summary
     cpt_summary_table = []
     total_allowed = 0
@@ -291,10 +331,11 @@ def _deterministic_full_output(claim: dict, prior_results: dict, examiner_decisi
         copay = float(line.get("copay", 0) or 0)
         coins = float(line.get("coinsurance", 0) or 0)
         oc_paid = float(line.get("oc_paid", 0) or 0)
-        net = oc_paid
+        net = float(cob_calc.get("net_amount", 0) or 0) if cob_calc else oc_paid
         adjustment = float(cob_calc.get("final_adjustment", 0) or 0)
         status = cob_calc.get("status", "Valid")
-        denial_code = line.get("denial_reason", "")
+        line_no = line.get("line_number", 1)
+        denial_code = claim_denial_codes.get(line_no, "")
 
         # Determine claim status and processing status
         if denial_code:

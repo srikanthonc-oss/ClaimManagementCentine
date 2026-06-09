@@ -1,5 +1,6 @@
 """Seed reference data for claims 899929180-899929199 into agent-extracted tables."""
 import sys
+import json
 sys.path.insert(0, '.')
 from app.db.pool import get_db
 
@@ -142,8 +143,8 @@ def seed():
         claim_id = get_claim_id(cur, claim_num)
         if claim_id:
             cur.execute(
-                "INSERT INTO claim_detail_lines (claim_id, line_no, cpt, modifier, start_date, end_date, units, billed_amt, allowed_amt, copay, coinsurance, oc_paid) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                (claim_id, sno, cpt, mod, start_dt, end_dt, units, billed, allowed, copay, coins, oc_paid)
+                "INSERT INTO claim_detail_lines (claim_id, line_no, cpt, modifier, start_date, end_date, units, billed_amt, allowed_amt, copay, coinsurance, oc_paid, claim_status, proc_status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                (claim_id, sno, cpt, mod, start_dt, end_dt, units, billed, allowed, copay, coins, oc_paid, "P", "U")
             )
 
     # ─── Denial_Details → claim_denial_details ────────────────────────────────
@@ -262,9 +263,13 @@ def seed():
         claim_id = get_claim_id(cur, claim_num)
         if claim_id:
             cur.execute("DELETE FROM claim_eob_extraction WHERE claim_id = %s", (claim_id,))
+            # Store adj_grp_code, reason_code, pr_amount as JSONB arrays
+            adj_grp_arr = json.dumps(adj_grp.split(", ") if isinstance(adj_grp, str) and ", " in adj_grp else [adj_grp] if adj_grp else [])
+            rsn_arr = json.dumps([rsn] if rsn else [])
+            pr_arr = json.dumps([pr_amt] if pr_amt else [])
             cur.execute(
-                "INSERT INTO claim_eob_extraction (claim_id, sno, cpt, insurance_name, paid_amt, adj_grp_code, reason_code, pr_amount) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (claim_id, sno, cpt, insurance, paid, adj_grp, rsn, pr_amt)
+                "INSERT INTO claim_eob_extraction (claim_id, sno, cpt, insurance_name, paid_amt, adj_grp_code, reason_code, pr_amount) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)",
+                (claim_id, sno, cpt, insurance, paid, adj_grp_arr, rsn_arr, pr_arr)
             )
 
     conn.commit()

@@ -190,12 +190,15 @@ async def upload_reference_data(req: ReferenceDataRequest, user=Depends(require_
         row = cur.fetchone()
         return str(row[0]) if row else None
 
-    # Hold Codes
+    # Hold Codes — first delete all existing hold codes for affected claims, then insert all rows
     inserted = 0
+    deleted_claims = set()
     for row in (req.holdCodes or []):
         cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
         if cid:
-            cur.execute("DELETE FROM claim_hold_codes WHERE claim_id = %s AND line_no = %s", (cid, row.get("lineNo") or row.get("Line#") or 1))
+            if cid not in deleted_claims:
+                cur.execute("DELETE FROM claim_hold_codes WHERE claim_id = %s", (cid,))
+                deleted_claims.add(cid)
             cur.execute("INSERT INTO claim_hold_codes (claim_id, line_no, hold_code, history, reason, description) VALUES (%s,%s,%s,%s,%s,%s)",
                 (cid, row.get("lineNo") or row.get("Line#") or 1, row.get("reason") or row.get("Reason") or "", row.get("history") or row.get("History") or "", row.get("reason") or row.get("Reason") or "", row.get("description") or row.get("Description") or ""))
             inserted += 1
@@ -217,8 +220,8 @@ async def upload_reference_data(req: ReferenceDataRequest, user=Depends(require_
     for row in (req.claimDetails or []):
         cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
         if cid:
-            cur.execute("INSERT INTO claim_detail_lines (claim_id, line_no, cpt, modifier, start_date, end_date, units, billed_amt, allowed_amt, copay, coinsurance, oc_paid) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                (cid, row.get("sno") or row.get("Sno") or 1, row.get("cpt") or row.get("CPT") or "", row.get("mod") or row.get("Mod") or "", row.get("startDate") or row.get("Start Date") or "", row.get("endDate") or row.get("End Date") or "", row.get("units") or row.get("Units") or 1, row.get("billedAmt") or row.get("Billed Amt") or 0, row.get("allowedAmt") or row.get("Allowed Amt") or 0, row.get("copay") or row.get("Copay") or 0, row.get("coins") or row.get("Coins") or 0, row.get("ocPaid") or row.get("OC Paid") or 0))
+            cur.execute("INSERT INTO claim_detail_lines (claim_id, line_no, cpt, modifier, start_date, end_date, units, billed_amt, allowed_amt, copay, coinsurance, oc_paid, claim_status, proc_status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                (cid, row.get("sno") or row.get("Sno") or 1, row.get("cpt") or row.get("CPT") or "", row.get("mod") or row.get("Mod") or "", row.get("startDate") or row.get("Start Date") or "", row.get("endDate") or row.get("End Date") or "", row.get("units") or row.get("Units") or 1, row.get("billedAmt") or row.get("Billed Amt") or 0, row.get("allowedAmt") or row.get("Allowed Amt") or 0, row.get("copay") or row.get("Copay") or 0, row.get("coins") or row.get("Coins") or 0, row.get("ocPaid") or row.get("OC Paid") or 0, row.get("claimStatus") or row.get("Claim Status") or None, row.get("procStatus") or row.get("Proc Status") or None))
             inserted += 1
     counts["claimDetails"] = inserted
 
@@ -249,8 +252,19 @@ async def upload_reference_data(req: ReferenceDataRequest, user=Depends(require_
         cid = get_cid(row.get("claimNumber") or row.get("Claim#"))
         if cid:
             cur.execute("DELETE FROM claim_eob_extraction WHERE claim_id = %s", (cid,))
-            cur.execute("INSERT INTO claim_eob_extraction (claim_id, sno, cpt, insurance_name, paid_amt, adj_grp_code, reason_code, pr_amount) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (cid, row.get("sno") or row.get("Sno") or 1, row.get("cpt") or row.get("CPT") or "", row.get("insuranceName") or row.get("Insurance Name") or "", row.get("paidAmt") or row.get("Paid Amt") or 0, row.get("adjGrpCode") or row.get("Adj Grp Code") or "", row.get("reason") or row.get("Rsn") or "", row.get("prAmount") or row.get("PR amount") or 0))
+            # adj_grp_code, reason_code, pr_amount are stored as JSONB arrays
+            adj_grp = row.get("adjGrpCode") or row.get("Adj Grp Code") or []
+            reason = row.get("reason") or row.get("Rsn") or []
+            pr_amt = row.get("prAmount") or row.get("PR amount") or []
+            # If values come as non-list, wrap in list
+            if not isinstance(adj_grp, list):
+                adj_grp = [adj_grp] if adj_grp else []
+            if not isinstance(reason, list):
+                reason = [reason] if reason else []
+            if not isinstance(pr_amt, list):
+                pr_amt = [pr_amt] if pr_amt else []
+            cur.execute("INSERT INTO claim_eob_extraction (claim_id, sno, cpt, insurance_name, paid_amt, adj_grp_code, reason_code, pr_amount) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)",
+                (cid, row.get("sno") or row.get("Sno") or 1, row.get("cpt") or row.get("CPT") or "", row.get("insuranceName") or row.get("Insurance Name") or "", row.get("paidAmt") or row.get("Paid Amt") or 0, json.dumps(adj_grp), json.dumps(reason), json.dumps(pr_amt)))
             inserted += 1
     counts["eobExtraction"] = inserted
 
@@ -370,7 +384,18 @@ async def get_agent_output(claim_id: str, user=Depends(get_current_user)):
     cob_history = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
 
     cur.execute("SELECT * FROM claim_eob_extraction WHERE claim_id = %s ORDER BY sno", (claim_id,))
-    eob_extraction = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
+    eob_extraction_raw = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
+    # Convert JSONB array fields to comma-separated strings for frontend display
+    eob_extraction = []
+    for eob in eob_extraction_raw:
+        eob_row = dict(eob)
+        if isinstance(eob_row.get("adj_grp_code"), list):
+            eob_row["adj_grp_code"] = ", ".join(str(x) for x in eob_row["adj_grp_code"])
+        if isinstance(eob_row.get("reason_code"), list):
+            eob_row["reason_code"] = ", ".join(str(x) for x in eob_row["reason_code"])
+        if isinstance(eob_row.get("pr_amount"), list):
+            eob_row["pr_amount"] = ", ".join(str(x) for x in eob_row["pr_amount"])
+        eob_extraction.append(eob_row)
 
     cur.execute("SELECT * FROM claim_denial_details WHERE claim_id = %s ORDER BY line_no", (claim_id,))
     denial_details = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
@@ -382,12 +407,28 @@ async def get_agent_output(claim_id: str, user=Depends(get_current_user)):
     cur.close()
     conn.close()
 
-    # Serialize UUIDs and datetimes
+    # Serialize UUIDs, datetimes, and Decimals for JSON response
     def serialize(obj):
         if isinstance(obj, list):
             return [serialize(item) for item in obj]
         if isinstance(obj, dict):
-            return {k: str(v) if hasattr(v, 'hex') or hasattr(v, 'isoformat') else (float(v) if hasattr(v, 'as_integer_ratio') else v) for k, v in obj.items()}
+            result = {}
+            for k, v in obj.items():
+                if hasattr(v, 'hex') or hasattr(v, 'isoformat'):
+                    result[k] = str(v)
+                elif hasattr(v, 'as_integer_ratio') and not isinstance(v, (int, float)):
+                    result[k] = float(v)
+                elif isinstance(v, dict):
+                    result[k] = serialize(v)
+                elif isinstance(v, list):
+                    result[k] = serialize(v)
+                else:
+                    result[k] = v
+            return result
+        if hasattr(obj, 'hex') or hasattr(obj, 'isoformat'):
+            return str(obj)
+        if hasattr(obj, 'as_integer_ratio') and not isinstance(obj, (int, float)):
+            return float(obj)
         return obj
 
     return {
@@ -426,7 +467,23 @@ async def get_agent_stage_output(claim_id: str, stage_number: int, user=Depends(
         if isinstance(obj, list):
             return [serialize(item) for item in obj]
         if isinstance(obj, dict):
-            return {k: str(v) if hasattr(v, 'hex') or hasattr(v, 'isoformat') else (float(v) if hasattr(v, 'as_integer_ratio') else v) for k, v in obj.items()}
+            result = {}
+            for k, v in obj.items():
+                if hasattr(v, 'hex') or hasattr(v, 'isoformat'):
+                    result[k] = str(v)
+                elif hasattr(v, 'as_integer_ratio') and not isinstance(v, (int, float)):
+                    result[k] = float(v)
+                elif isinstance(v, dict):
+                    result[k] = serialize(v)
+                elif isinstance(v, list):
+                    result[k] = serialize(v)
+                else:
+                    result[k] = v
+            return result
+        if hasattr(obj, 'hex') or hasattr(obj, 'isoformat'):
+            return str(obj)
+        if hasattr(obj, 'as_integer_ratio') and not isinstance(obj, (int, float)):
+            return float(obj)
         return obj
 
     return serialize(dict(zip(cols, row)))

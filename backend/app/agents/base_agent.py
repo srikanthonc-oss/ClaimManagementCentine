@@ -13,7 +13,7 @@ SKIP_BEDROCK = os.getenv("SKIP_BEDROCK", "false").lower() in ("true", "1", "yes"
 
 # Reuse a single Bedrock client (avoid creating one per call)
 _bedrock_client = None
-_BEDROCK_TIMEOUT = 10  # seconds - fail fast and use deterministic fallback
+_BEDROCK_TIMEOUT = 60  # seconds
 
 
 def _get_bedrock_client():

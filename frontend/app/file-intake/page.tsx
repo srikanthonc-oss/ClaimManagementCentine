@@ -304,12 +304,44 @@ export default function FileIntakePage() {
       }
 
       // Map to API format
-      const holdCodes = holdCodesRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), lineNo: r['Line#'] || 1, history: r['History'] || '', reason: r['Reason'] || '', description: r['Description'] || '' }))
+      const holdCodes = holdCodesRaw.map((r: any, idx: number) => {
+        let claimNum = String(r['Claim#'] || '')
+        // If Claim# is empty, carry forward from previous row
+        if (!claimNum && idx > 0) {
+          claimNum = String(holdCodesRaw[idx - 1]['Claim#'] || '')
+        }
+        return { claimNumber: claimNum, lineNo: r['Line#'] || 0, history: r['History'] || '', reason: r['Reason'] || '', description: r['Description'] || '' }
+      })
       const claimHeaders = claimHeadersRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), memberId: String(r['Member Id'] || ''), specialty: r['Speciality'] || '', plcOfSvc: String(r['Plc of Svc'] || ''), par: r['Par'] || '', receivedDate: excelDateToStr(r['Received Date']) }))
-      const claimDetails = claimDetailsRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, cpt: String(r['CPT'] || ''), mod: String(r['Mod'] || ''), startDate: excelDateToStr(r['Start Date']), endDate: excelDateToStr(r['End Date']), units: r['Units'] || 1, billedAmt: r['Billed Amt'] || 0, allowedAmt: r['Allowed Amt'] || 0, copay: r['Copay'] || 0, coins: r['Coins'] || 0, ocPaid: r['OC Paid'] || 0 }))
+      const claimDetails = claimDetailsRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, cpt: String(r['CPT'] || ''), mod: String(r['Mod'] || ''), startDate: excelDateToStr(r['Start Date']), endDate: excelDateToStr(r['End Date']), units: r['Units'] || 1, billedAmt: r['Billed Amt'] || 0, allowedAmt: r['Allowed Amt'] || 0, copay: r['Copay'] || 0, coins: r['Coins'] || 0, ocPaid: r['OC Paid'] || 0, claimStatus: r['Claim Status'] || '', procStatus: r['Proc Status'] || '' }))
       const denialDetails = denialDetailsRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), lineNo: r['Line#'] || 1, history: r['History'] || '', reasonCode: r['Rsn Code'] || '' }))
       const cobHistory = cobHistoryRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, primaryInsurance: r['Primary Insurance'] || '', effectiveDate: excelDateToStr(r['Effective Date']), termDate: excelDateToStr(r['Term Date']) }))
-      const eobExtraction = eobExtractionRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 1, cpt: String(r['CPT'] || ''), insuranceName: r['Insurance Name'] || '', paidAmt: r['Paid Amt'] || 0, adjGrpCode: r['Adj Grp Code'] || '', reason: String(r['Rsn'] || ''), prAmount: r['PR amount'] || 0 }))
+      const eobExtractionMapped = eobExtractionRaw.map((r: any) => ({ claimNumber: String(r['Claim#'] || ''), sno: r['Sno'] || 0, cpt: String(r['CPT'] || ''), insuranceName: r['Insurance Name'] || '', paidAmt: r['Paid Amt'] || 0, adjGrpCode: String(r['Adj Grp Code'] || '').trim(), reason: String(r['Rsn'] || '').trim(), prAmount: r['PR amount'] || 0 }))
+
+      // Merge continuation rows (rows without Claim# are continuations of the previous row)
+      // Store adj_grp_code, reason, prAmount as arrays for JSONB storage
+      const eobExtraction: any[] = []
+      for (const row of eobExtractionMapped) {
+        if (row.claimNumber && row.claimNumber !== '' && row.claimNumber !== '0') {
+          // Primary row — push as new entry with arrays
+          eobExtraction.push({
+            claimNumber: row.claimNumber,
+            sno: row.sno,
+            cpt: row.cpt,
+            insuranceName: row.insuranceName,
+            paidAmt: row.paidAmt,
+            adjGrpCode: row.adjGrpCode ? [row.adjGrpCode] : [],
+            reason: row.reason ? [row.reason] : [],
+            prAmount: row.prAmount ? [Number(row.prAmount)] : []
+          })
+        } else if (eobExtraction.length > 0) {
+          // Continuation row — append to arrays of the last entry
+          const last = eobExtraction[eobExtraction.length - 1]
+          if (row.adjGrpCode) last.adjGrpCode.push(row.adjGrpCode)
+          if (row.reason) last.reason.push(row.reason)
+          if (row.prAmount) last.prAmount.push(Number(row.prAmount))
+        }
+      }
 
       const result = await api.claims.uploadReference({ holdCodes, claimHeaders, claimDetails, denialDetails, cobHistory, eobExtraction })
       console.log('[RefUpload] Parsed counts:', { holdCodes: holdCodes.length, claimHeaders: claimHeaders.length, claimDetails: claimDetails.length, denialDetails: denialDetails.length, cobHistory: cobHistory.length, eobExtraction: eobExtraction.length })

@@ -36,6 +36,45 @@ def run_coordination_agent(claim: dict) -> dict:
     else:
         output_data = _deterministic_full_output(claim, eob_data, detail_lines, cob_history, denial_details, hold_codes, header_detail)
 
+    # Always override action type with our deterministic business logic (LLM may misinterpret codes)
+    try:
+        # Determine correct action type from EOB data
+        pr_codes = []
+        for eob in eob_data:
+            raw_reason = eob.get("reason_code", "")
+            raw_adj = eob.get("adj_grp_code", "")
+            reason_list = raw_reason if isinstance(raw_reason, list) else [raw_reason] if raw_reason else []
+            adj_list = raw_adj if isinstance(raw_adj, list) else [raw_adj] if raw_adj else []
+            for idx, rc in enumerate(reason_list):
+                grp = adj_list[idx] if idx < len(adj_list) else ""
+                if str(grp).strip().upper() == "PR" and rc:
+                    pr_codes.append(str(rc))
+        
+        has_dnnpr = any("DNNPR" in str(d.get("reason_code", "")).upper() for d in denial_details if d.get("reason_code"))
+        accepted_codes = ("1", "2", "3", "96", "97", "204")
+        
+        if has_dnnpr:
+            correct_action = "DENY"
+        elif not pr_codes and not eob_data:
+            correct_action = "DENY"
+        elif any(c in ("96", "204") for c in pr_codes):
+            correct_action = "PAY AS PRIMARY"
+        elif any(c in ("1", "2", "3") for c in pr_codes):
+            correct_action = "COORDINATION - PAY AS SECONDARY"
+        else:
+            correct_action = "COORDINATION - HOLD & REVIEW REQUIRED"
+        
+        # Patch output
+        claim_analysis = output_data.get("claim_analysis", {})
+        if claim_analysis.get("recommended_action_type"):
+            claim_analysis["recommended_action_type"]["action_type"] = correct_action
+        if claim_analysis.get("final_summary"):
+            claim_analysis["final_summary"]["action_type"] = correct_action
+            if "DENY" not in correct_action:
+                claim_analysis["final_summary"]["claim_status"] = "HOLD"
+    except Exception:
+        pass
+
     # Extract key fields for stage output
     final_summary = output_data.get("claim_analysis", {}).get("final_summary", {})
     rec_action = output_data.get("claim_analysis", {}).get("recommended_action_type", {})
@@ -56,31 +95,70 @@ def run_coordination_agent(claim: dict) -> dict:
 
 def _build_prompt(claim: dict, eob_data: list, detail_lines: list, cob_history: list, denial_details: list, hold_codes: list, header_detail: dict) -> str:
     """Build the prompt for coordination analysis."""
-    return f"""You are a healthcare COB coordination rule analyst. Analyze the coordination of benefits for this claim.
+    return f"""You are a healthcare COB coordination rule analyst.
+
+Analyze the claim and determine the correct Action Type using the business logic below.
 
 Claim: {claim.get('claim_number')}
 Billed: ${claim.get('billed_amount', 0)}
 Classification: {claim.get('classification')}
 Hold Code: {claim.get('hold_code', 'N/A')}
 
-Detail Lines: {json.dumps(detail_lines, default=str)}
 EOB Data: {json.dumps(eob_data, default=str)}
+Detail Lines: {json.dumps(detail_lines, default=str)}
 COB History: {json.dumps(cob_history, default=str)}
 Denial Details: {json.dumps(denial_details, default=str)}
 Hold Codes: {json.dumps(hold_codes, default=str)}
 Header Detail: {json.dumps(header_detail, default=str)}
 
-Business Logic to identify Action Type:
-1. Pay as Primary - If EOB contains PR 96, 204 or any reason codes indicating primary. Validate authorization.
-2. Coordination - Pay as Secondary - If EOB contains PR reason as 1, 2, 3 then coordination action type.
-3. Deny - If EOB contains CO 45 or Denial_Details has DNNPR.
+Business Logic to Identify Action Type:
 
-Analyze:
-- CPT line items with allowed, copay, coinsurance, OC paid, net amount
-- Denial codes present
-- Primary EOB details: PR codes, CO codes
-- Authorization status
-- Action type determination with AI reasoning
+1. Pay as Primary
+If the EOB contains PR reason code 96, 204, or any other PR reason code indicating primary payment responsibility:
+- Action Type = Pay as Primary
+- Validate authorization for the applicable services.
+
+2. Coordination - Pay as Secondary
+If the EOB contains PR reason code 1, 2, or 3:
+- Action Type = Coordination
+- Pay as Secondary
+
+3. Deny
+If the EOB contains a reason code other than PR reason codes 1, 2, 3, 96, 97, or 204 And CO reason code 45: 
+- Denial Code = DNNPR
+- Action Type = Deny
+
+If the EOB is unavailable, blank, incomplete, or missing required information such as reason code or adjustment group:
+- Denial Code = DNEOB
+- Action Type = Deny
+
+Output Format:
+
+1. AI Coordination Analysis
+
+Return CPT lines in tabular format.
+Each CPT must be treated as a separate line item.
+
+CPT Line table columns:
+CPT, Allowed Amount, Copay, Coins, Net Amount
+
+Also include:
+- Denial codes, if present
+- Primary EOB details:
+  - PR Codes Identified
+  - CO Codes Identified
+  - Image Link, if available
+- Authorization Status
+- Action Type: Pay as Primary, Coordination, or Deny
+
+2. AI Reasoning
+
+Explain:
+- Why the claim qualifies as Pay as Primary, Coordination, or Deny
+- Interpretation of EOB reason codes
+- Authorization validation results
+- Denial logic applied
+- Evidence reviewed
 
 Return ONLY a valid JSON object matching this structure (no markdown, no code fences):
 {{
@@ -189,18 +267,43 @@ def _deterministic_full_output(claim: dict, eob_data: list, detail_lines: list, 
     primary_eob_details = []
 
     for eob in eob_data:
-        reason_code = str(eob.get("reason_code", ""))
-        adj_grp = str(eob.get("adj_grp_code", ""))
-        pr_amount = float(eob.get("pr_amount", 0) or 0)
+        # Handle JSONB arrays — reason_code, pr_amount, adj_grp_code may be lists
+        raw_reason = eob.get("reason_code", "")
+        raw_adj = eob.get("adj_grp_code", "")
+        raw_pr = eob.get("pr_amount", 0)
+        reason_codes = raw_reason if isinstance(raw_reason, list) else [raw_reason] if raw_reason else []
+        adj_grps = raw_adj if isinstance(raw_adj, list) else [raw_adj] if raw_adj else []
+        pr_amounts = raw_pr if isinstance(raw_pr, list) else [raw_pr] if raw_pr else []
+
+        # Only sum PR-group amounts (not CO)
+        pr_amount = 0
+        pr_reason_codes = []
+        for idx, rc in enumerate(reason_codes):
+            grp = adj_grps[idx] if idx < len(adj_grps) else ""
+            amt = float(pr_amounts[idx]) if idx < len(pr_amounts) else 0
+            if str(grp).strip().upper() == "PR":
+                pr_amount += amt
+                if rc:
+                    pr_reason_codes.append(str(rc))
+
+        reason_code = str(pr_reason_codes[0]) if pr_reason_codes else ""
+        total_pr = pr_amount
         paid_amt = float(eob.get("paid_amt", 0) or 0)
         insurance = str(eob.get("insurance_name", ""))
 
-        if reason_code:
-            pr_codes_found.append(reason_code)
-        if "CO" in adj_grp:
-            co_codes_found.append("CO")
-        if "PR" in adj_grp:
-            co_codes_found.append("PR")
+        for rc in pr_reason_codes:
+            if rc:
+                pr_codes_found.append(str(rc))
+        all_adj_codes = []
+        for ag in adj_grps:
+            for code in str(ag).replace(",", " ").split():
+                code = code.strip()
+                if code:
+                    all_adj_codes.append(code)
+                    if code == "CO":
+                        co_codes_found.append("CO")
+                    if code == "PR":
+                        co_codes_found.append("PR")
 
         # Determine PR description
         pr_desc = "Coordination of Benefits Applicable" if reason_code in ("1", "2", "3") else \
@@ -210,11 +313,11 @@ def _deterministic_full_output(claim: dict, eob_data: list, detail_lines: list, 
         primary_eob_details.append({
             "cpt_code": str(eob.get("cpt", "")),
             "primary_insurance": insurance,
-            "pr_reason_code": reason_code,
+            "pr_reason_code": ", ".join(pr_reason_codes) if pr_reason_codes else "",
             "pr_reason_description": pr_desc,
-            "co_adj_group_codes": list(set(adj_grp.replace(",", " ").split())),
+            "co_adj_group_codes": list(set(all_adj_codes)),
             "paid_amount": round(paid_amt, 2),
-            "pr_amount": round(pr_amount, 2),
+            "pr_amount": round(total_pr, 2),
         })
 
     # COB history with status
@@ -253,26 +356,46 @@ def _deterministic_full_output(claim: dict, eob_data: list, detail_lines: list, 
             "status": "Active Denial",
         })
 
-    # Determine action type
+    # Determine action type per business logic:
+    # PR 96, 204 = Pay as Primary
+    # PR 1, 2, 3 = Coordination (Pay as Secondary)
+    # PR code not in (1, 2, 3, 96, 97, 204) = Deny as DNNPR
+    # No EOB/missing reason codes = Deny as DNEOB
     has_primary_pr = any(c in ("96", "204") for c in pr_codes_found)
     has_secondary_pr = any(c in ("1", "2", "3") for c in pr_codes_found)
-    has_co45 = "45" in pr_codes_found or any("CO" in str(eob.get("adj_grp_code", "")) and "45" in str(eob.get("reason_code", "")) for eob in eob_data)
+    accepted_pr_codes = ("1", "2", "3", "96", "97", "204")
+    has_unaccepted_pr = any(c not in accepted_pr_codes for c in pr_codes_found) if pr_codes_found else False
+    eob_missing = len(eob_data) == 0 or len(pr_codes_found) == 0
 
-    if has_co45 or has_dnnpr:
+    if has_dnnpr:
         action_type = "DENY"
         determination = "DENY"
-        business_logic = "If EOB contains CO 45 or Denial_Details contains DNNPR, deny the claim"
+        denial_code = "DNNPR"
+        business_logic = "Denial_Details contains DNNPR"
+    elif eob_missing:
+        action_type = "DENY"
+        determination = "DENY"
+        denial_code = "DNEOB"
+        business_logic = "EOB is unavailable, blank, or missing required information such as reason code or adjustment group"
+    elif has_unaccepted_pr and not has_primary_pr and not has_secondary_pr:
+        action_type = "DENY"
+        determination = "DENY"
+        denial_code = "DNNPR"
+        business_logic = "EOB contains PR reason code not in (1, 2, 3, 96, 97, 204)"
     elif has_primary_pr:
         action_type = "PAY AS PRIMARY"
         determination = "PRIMARY"
-        business_logic = "If EOB contains PR 96, 204 indicating primary, pay as primary"
+        denial_code = ""
+        business_logic = "EOB contains PR 96 or 204 indicating primary payment responsibility"
     elif has_secondary_pr:
-        action_type = "COORDINATION - HOLD & REVIEW REQUIRED"
+        action_type = "COORDINATION - PAY AS SECONDARY"
         determination = "SECONDARY/COORDINATION"
-        business_logic = "If EOB contains PR reason as 1, 2, 3 then consideration coordination action type"
+        denial_code = ""
+        business_logic = "EOB contains PR reason code 1, 2, or 3 - Coordination Pay as Secondary"
     else:
         action_type = "COORDINATION - HOLD & REVIEW REQUIRED"
         determination = "SECONDARY/COORDINATION"
+        denial_code = ""
         business_logic = "Default to coordination when no clear primary/deny indicators"
 
     # Build line-specific actions
@@ -280,7 +403,7 @@ def _deterministic_full_output(claim: dict, eob_data: list, detail_lines: list, 
     denied_count = 0
     coord_count = 0
     for line in cpt_line_items:
-        line_denied = any(d["line_number"] == line["line_number"] for d in denial_entries)
+        line_denied = any(d["line_number"] == line["line_number"] and d["denial_code"] for d in denial_entries)
         if line_denied:
             denied_count += 1
             line_actions.append({

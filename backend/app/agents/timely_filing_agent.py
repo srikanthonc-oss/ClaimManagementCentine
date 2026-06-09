@@ -21,9 +21,6 @@ STATE_FILING_LIMITS = {
     "DEFAULT": 365,
 }
 
-POS_CODES = ["11", "21", "22", "23", "24", "31", "32", "41", "51", "61", "81"]
-
-
 def run_timely_filing_agent(claim: dict) -> dict:
     """Run timely filing check for a claim."""
     claim_id = claim["id"]
@@ -63,6 +60,56 @@ def run_timely_filing_agent(claim: dict) -> dict:
     else:
         # Deterministic fallback — generate the full structured output
         output_data = _deterministic_full_output(claim, detail_lines, cob_history, hold_codes, recv_dt)
+
+    # Always override DOS-to-received with our own calculation (LLM often gets dates wrong)
+    try:
+        max_end_date = ""
+        if detail_lines:
+            for line in detail_lines:
+                end_dt = str(line.get("end_date", ""))
+                if end_dt and end_dt > max_end_date:
+                    max_end_date = end_dt
+        if max_end_date and recv_dt:
+            from datetime import datetime as dt_parse
+            date_fmts = ["%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"]
+            dos_d = None
+            recv_d = None
+            for fmt in date_fmts:
+                if not dos_d:
+                    try: dos_d = dt_parse.strptime(max_end_date, fmt)
+                    except: pass
+                if not recv_d:
+                    try: recv_d = dt_parse.strptime(recv_dt, fmt)
+                    except: pass
+            if dos_d and recv_d:
+                correct_diff = (recv_d - dos_d).days
+                filing_limit = STATE_FILING_LIMITS.get(claim.get("state", "OH") or "OH", 365)
+                is_compliant = correct_diff <= filing_limit
+                # Patch all relevant sections in the output
+                claim_analysis = output_data.get("claim_analysis", {})
+                tf_calc = claim_analysis.get("timely_filing_calculation", {})
+                if tf_calc:
+                    tf_calc["dos_to_received_difference_days"] = correct_diff
+                    tf_calc["dos_to_received_difference_status"] = "COMPLIANT" if is_compliant else "NON_COMPLIANT"
+                tf_status = claim_analysis.get("timely_filing_status", {})
+                if tf_status:
+                    tf_status["compliance"] = is_compliant
+                    tf_status["status"] = "WITHIN_TIMELY_FILING_LIMITS" if is_compliant else "EXCEEDED_TIMELY_FILING_LIMITS"
+                ai_reasoning = claim_analysis.get("ai_reasoning", {})
+                if ai_reasoning.get("date_difference_status"):
+                    ai_reasoning["date_difference_status"]["finding"] = "COMPLIANT" if is_compliant else "NON_COMPLIANT"
+                    ai_reasoning["date_difference_status"]["details"] = f"The claim was received {correct_diff} days after the latest date of service ({max_end_date}). This {'falls well within' if is_compliant else 'exceeds'} the standard {filing_limit}-day timely filing requirement."
+                if ai_reasoning.get("ky_state_logic"):
+                    ai_reasoning["ky_state_logic"]["date_difference"] = correct_diff
+                    ai_reasoning["ky_state_logic"]["meets_requirement"] = is_compliant
+                final_rec = claim_analysis.get("final_recommendation", {})
+                if final_rec:
+                    final_rec["timely_filing_recommendation"] = "APPROVE" if is_compliant else "DENY"
+                    final_rec["timely_filing_reason"] = f"Received {correct_diff} days after DOS - {'within' if is_compliant else 'exceeds'} {filing_limit}-day limit"
+                    if is_compliant:
+                        final_rec["overall_status"] = "APPROVED"
+    except Exception:
+        pass
 
     # Extract key fields for stage output storage
     timely_status = output_data.get("claim_analysis", {}).get("timely_filing_status", {})
@@ -115,10 +162,11 @@ COB History: {json.dumps(cob_history, default=str)}
 Hold Codes: {json.dumps(hold_codes, default=str)}
 
 Business Logic:
-1. Calculate DOS-to-Received difference using maximum end_date from detail lines
-2. Compare against state filing limit ({filing_limit} days)
-3. Validate COB coverage: check if insurance term dates cover the date of service
-4. If coverage gap found, flag as COB concern
+
+If (Par_Flag='Par' or Denial = "TFLDN")
+
+	Calculate the Date difference between 'End Date' and 'recv_dt'.
+	Date Diff <= 365 days for KY state follow next step. if Date Diff >365. Deny as "TFLDN"
 
 Return ONLY this exact JSON structure:
 {{
@@ -127,7 +175,6 @@ Return ONLY this exact JSON structure:
       "claim_number": "{claim.get('claim_number')}",
       "subscriber_id": "{claim.get('subscriber_id', 'N/A')}",
       "provider_specialty": "{claim.get('provider_specialty', 'N/A')}",
-      "place_of_service": "<POS code>",
       "par_status": "{claim.get('par_flag', 'N/A')}",
       "received_date": "{recv_dt or 'N/A'}"
     }},
@@ -141,7 +188,6 @@ Return ONLY this exact JSON structure:
       "dos_to_received_difference_status": "COMPLIANT" or "NON_COMPLIANT"
     }},
     "timely_filing_status": {{
-      "days_aged": {claim.get('days_aged', 0)},
       "state": "{claim.get('state', 'OH')}",
       "standard_requirement_days": {filing_limit},
       "status": "WITHIN_TIMELY_FILING_LIMITS" or "EXCEEDED_TIMELY_FILING_LIMITS",
@@ -225,7 +271,6 @@ def _deterministic_full_output(claim: dict, detail_lines: list, cob_history: lis
     seed_val = sum(ord(c) for c in claim_number) if claim_number else 42
     filing_limit = STATE_FILING_LIMITS.get(state, 365)
     days_remaining = filing_limit - days_aged
-    pos = POS_CODES[seed_val % len(POS_CODES)]
 
     # Determine max end date from detail lines
     max_end_date = ""
@@ -239,8 +284,28 @@ def _deterministic_full_output(claim: dict, detail_lines: list, cob_history: lis
     if not max_end_date:
         max_end_date = recv_dt or datetime.now().strftime("%m/%d/%Y")
 
-    # Calculate DOS to received difference
-    dos_to_received = days_aged  # approximate
+    # Calculate DOS to received difference (actual date calculation)
+    dos_to_received = days_aged  # fallback
+    try:
+        # Parse max_end_date and recv_dt to calculate actual difference
+        date_formats = ["%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"]
+        dos_date = None
+        recv_date = None
+        for fmt in date_formats:
+            if not dos_date and max_end_date:
+                try:
+                    dos_date = datetime.strptime(max_end_date, fmt)
+                except ValueError:
+                    pass
+            if not recv_date and recv_dt:
+                try:
+                    recv_date = datetime.strptime(recv_dt, fmt)
+                except ValueError:
+                    pass
+        if dos_date and recv_date:
+            dos_to_received = (recv_date - dos_date).days
+    except Exception:
+        pass
 
     # Compliance check
     is_compliant = days_aged <= filing_limit
@@ -324,7 +389,6 @@ def _deterministic_full_output(claim: dict, detail_lines: list, cob_history: lis
                 "claim_number": claim_number,
                 "subscriber_id": subscriber_id,
                 "provider_specialty": specialty,
-                "place_of_service": pos,
                 "par_status": par_flag,
                 "received_date": recv_dt or datetime.now().strftime("%m/%d/%Y"),
             },
